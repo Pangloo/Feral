@@ -48,20 +48,20 @@ function Functions.get_dps_target(range)
     -- always prioritize checking current target first
     local target = core.object_manager.get_local_player():get_target()
     if target and Functions.validate_enemy(target, range) then
-         return target
+        return target
     end
     -- Fallback to nearest
     local raw_enemies = target_selector:get_targets()
     local best_enemy = nil
     local min_dist = 999
     for _, enemy in ipairs(raw_enemies) do
-         if Functions.validate_enemy(enemy, range) then
-             local dist = enemy:distance()
-             if dist < min_dist then
-                  min_dist = dist
-                  best_enemy = enemy
-             end
-         end
+        if Functions.validate_enemy(enemy, range) then
+            local dist = enemy:distance()
+            if dist < min_dist then
+                min_dist = dist
+                best_enemy = enemy
+            end
+        end
     end
     return best_enemy
 end
@@ -70,9 +70,9 @@ function Functions.count_enemies_in_range(range)
     local raw_enemies = target_selector:get_targets()
     local count = 0
     for _, enemy in ipairs(raw_enemies) do
-         if Functions.validate_enemy(enemy, range) then
-              count = count + 1
-         end
+        if Functions.validate_enemy(enemy, range) then
+            count = count + 1
+        end
     end
     return math.max(1, count)
 end
@@ -81,9 +81,9 @@ function Functions.get_all_enemies_in_range(range)
     local raw_enemies = target_selector:get_targets()
     local enemies = {}
     for _, enemy in ipairs(raw_enemies) do
-         if Functions.validate_enemy(enemy, range) then
-              table.insert(enemies, enemy)
-         end
+        if Functions.validate_enemy(enemy, range) then
+            table.insert(enemies, enemy)
+        end
     end
     return enemies
 end
@@ -94,11 +94,11 @@ function Functions.get_best_dot_target(debuff_id, range, refresh_time, current_t
             return current_target
         end
     end
-    
+
     local enemies = Functions.get_all_enemies_in_range(range)
     local best_target = nil
     local min_remains = 999
-    
+
     for _, e in ipairs(enemies) do
         local rem = Functions.get_debuff_remains(e, debuff_id)
         if rem < refresh_time and rem < min_remains then
@@ -106,7 +106,7 @@ function Functions.get_best_dot_target(debuff_id, range, refresh_time, current_t
             best_target = e
         end
     end
-    
+
     return best_target
 end
 
