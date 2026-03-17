@@ -13,6 +13,7 @@ Lists.BUFFS = {
     SUDDEN_AMBUSH = 385009,
     RAVAGE = 400494,        -- Just placeholder for ravage/chomp enabler
     CHOMP_ENABLER = 400494, -- placeholder
+    TRAVEL_FORM = 783,
 }
 
 Lists.DEBUFFS = {
@@ -22,6 +23,14 @@ Lists.DEBUFFS = {
     THRASH = 106830,
     MOONFIRE = 155625,
     BLOODSEEKER_VINES = 400495, -- placeholder
+}
+
+Lists.DISPEL_LOGIC = {
+    -- Example: [spell_id] = { priority = 1, stacks = 1 }
+}
+
+Lists.SPECIAL_DISPELS = {
+    -- White-listed dangerous spells that might not show up as standard debuff types
 }
 
 return Lists

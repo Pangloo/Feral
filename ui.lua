@@ -5,7 +5,7 @@ local menu = require("menu")
 
 local UI = {}
 
-local window_size = vec2.new(210, 80) -- Fixed size to fit 3 Buttons (Rot, CDs, Int)
+local window_size = vec2.new(275, 80) -- Tightened fit for 4 buttons
 local button_size = vec2.new(60, 60)
 local spacing = 5
 local padding = 10
@@ -21,12 +21,13 @@ local color_border = color.new(255, 255, 255, 50)    -- Border
 
 function UI.draw()
     if not win then
-        win = core.menu.window(" Feral Hotbar")
+        win = core.menu.window(" Feral Hotbar V3")
         win:set_initial_size(window_size)
         win:set_initial_position(vec2.new(500, 500))
     end
 
     if win and menu.ENABLED then
+        win:set_visibility(menu.ENABLED:get_state())
     end
 
     tooltip_to_draw = nil
@@ -71,6 +72,7 @@ function UI.draw()
             draw_btn("Rotation", menu.ENABLE_ROTATION, "Enable and disable rotation")
             draw_btn("CDs", menu.USE_COOLDOWNS, "Toggle Use Cooldowns")
             draw_btn("Kick", menu.AUTO_INTERRUPT, "Toggle Auto Interrupt")
+            draw_btn("Dispel", menu.AUTO_DISPEL, "Toggle Auto Dispel")
 
             if tooltip_to_draw then
                 local t_text = tooltip_to_draw

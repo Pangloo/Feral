@@ -204,11 +204,13 @@ end
 
 -- APL: aoe_builder
 actionList.aoe_builder = function(target, spell_targets, combo_points, energy)
-    -- Rake conditions simplified (Scan and Spread)
-    local rake_target = funcs.get_best_dot_target(lists.DEBUFFS.RAKE, 8, 4.5, target)
-    if rake_target then
-        if energy < 35 then return true end
-        if spells.RAKE:cast(rake_target, "Rake (refresh/spread)") then return true end
+    -- Rake conditions simplified (Scan and Spread) - Only if targets < 4
+    if spell_targets < 4 then
+        local rake_target = funcs.get_best_dot_target(lists.DEBUFFS.RAKE, 8, 4.5, target)
+        if rake_target then
+            if energy < 35 then return true end
+            if spells.RAKE:cast(rake_target, "Rake (refresh/spread)") then return true end
+        end
     end
 
     -- Thrash
@@ -260,21 +262,17 @@ end
 -- APL: aoe_finisher
 actionList.aoe_finisher = function(target, spell_targets, combo_points, energy)
     local has_bs = me:has_buff(lists.BUFFS.BERSERK) or me:has_buff(lists.BUFFS.INCARNATION)
-    local pw_remains = funcs.get_debuff_remains(target, lists.DEBUFFS.PRIMAL_WRATH)
-    local pw_ticking = pw_remains > 0
 
+    -- Primal Wrath: Only cast if a target in range has the dot expiring within 5 seconds
     if spells.PRIMAL_WRATH:is_learned() and combo_points >= 5 and spell_targets > 1 then
-        if pw_remains < 6.5 and not has_bs or not pw_ticking then
+        local pw_target = funcs.get_best_dot_target(lists.DEBUFFS.RIP, 8, 5.0, target)
+        if pw_target then
             if energy < 20 then return true end
             if spells.PRIMAL_WRATH:cast(target, "Primal Wrath") then return true end
         end
     end
 
-    if me:has_buff(lists.BUFFS.RAVAGE) and combo_points >= 4 and not talent.primal_wrath and spell_targets >= 2 then
-        if energy < 50 and not me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING) then return true end
-        if spells.FEROCIOUS_BITE:cast(target, "Ferocious Bite (Ravage)") then return true end
-    end
-
+    -- Manual Rip Spread (Only if Primal Wrath is not learned)
     if not talent.primal_wrath and combo_points >= 4 then
         local rip_target = funcs.get_best_dot_target(lists.DEBUFFS.RIP, 8, 7, target)
         if rip_target then
@@ -283,14 +281,12 @@ actionList.aoe_finisher = function(target, spell_targets, combo_points, energy)
         end
     end
 
-    if spells.PRIMAL_WRATH:is_learned() and combo_points >= 5 then
-        if energy < 20 then return true end
-        if spells.PRIMAL_WRATH:cast(target, "Primal Wrath (Fallback)") then return true end
-    end
-
-    if combo_points >= 4 + (talent.primal_wrath and 1 or 0) or me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING) then
+    -- Ferocious Bite / Ravage (Prioritized if no dot maintenance was performed)
+    local min_cp = 4 + (talent.primal_wrath and 1 or 0)
+    if combo_points >= min_cp or me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING) then
         if energy < 50 and not me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING) then return true end
-        if spells.FEROCIOUS_BITE:cast(target, "Ferocious Bite (AoE)") then return true end
+        local reason = me:has_buff(lists.BUFFS.RAVAGE) and "Ferocious Bite (Ravage)" or "Ferocious Bite (AoE)"
+        if spells.FEROCIOUS_BITE:cast(target, reason) then return true end
     end
 
     return false
@@ -344,6 +340,25 @@ actionList.finisher = function(target, spell_targets, combo_points, energy)
     return false
 end
 
+-- APL: utility
+actionList.utility = function()
+    if not menu.AUTO_INTERRUPT:get_state() then return false end
+    if not spells.SKULL_BASH:is_learned() or not spells.SKULL_BASH:cooldown_up() then return false end
+
+    local target = funcs.get_interrupt_target(13) -- Skull Bash range is 13 yards
+    if target then
+        return spells.SKULL_BASH:cast(target, "Skull Bash")
+    end
+
+    -- Dispel
+    local dispel_target, debuff_id, debuff_type = funcs.check_all_dispels(40)
+    if dispel_target then
+        return spells.REMOVE_CORRUPTION:cast(dispel_target, "Remove Corruption (" .. tostring(debuff_id) .. ")", { skip_facing = true })
+    end
+
+    return false
+end
+
 --------------------------------------------------------------------------------
 -- MAIN UPDATE
 --------------------------------------------------------------------------------
@@ -356,23 +371,45 @@ local function on_update()
 
     if me:is_casting() or me:is_channeling() then return end
 
+    funcs.update_party_cache()
     update_variables()
 
     local spell_targets = funcs.count_enemies_in_range(8)
     local combo_points = me:get_power(4) or 0
-    local target = funcs.get_dps_target(25)
+    local target = funcs.get_dps_target(6)
 
     -- Precombat
     if not me:affecting_combat() then
+        if menu.AUTO_TRAVEL:get_state() and me:is_outdoors() then
+            if not me:has_buff(lists.BUFFS.TRAVEL_FORM) then
+                spells.TRAVEL_FORM:cast(me, "Auto Travel Form")
+                return
+            end
+        elseif me:is_indoors() or not menu.AUTO_TRAVEL:get_state() then
+            if not me:has_buff(lists.BUFFS.CAT_FORM) then
+                spells.CAT_FORM:cast(me, "Cat Form")
+                return
+            end
+            if not me:has_buff(lists.BUFFS.PROWL) and not me:has_buff(lists.BUFFS.SHADOWMELD) then
+                spells.PROWL:cast(me, "Prowl")
+                return
+            end
+        end
+        return
+    end
+
+    if me:affecting_combat() then
         if not me:has_buff(lists.BUFFS.CAT_FORM) then
             spells.CAT_FORM:cast(me, "Cat Form")
             return
         end
-        if not me:has_buff(lists.BUFFS.PROWL) and not me:has_buff(lists.BUFFS.SHADOWMELD) then
-            spells.PROWL:cast(me, "Prowl")
-            return
+    end
+
+    if me:has_buff(lists.BUFFS.PREDATORY_SWIFTNESS) and variable.regrowth then
+        local hp_pct = me:get_health_percentage()
+        if hp_pct < 80 then
+            if spells.REGROWTH:cast(me, "Regrowth (Swiftness)") then return end
         end
-        return
     end
 
     if not target then return end
@@ -384,6 +421,8 @@ local function on_update()
     if variable.use_custom_timers then
         actionList.custom_timers()
     end
+
+    if actionList.utility() then return end
 
     local tf_dur = 10 -- aprox duration
     if (not variable.use_custom_timers and (spells.TIGERS_FURY:cooldown_remains() < tf_dur - 1.5)) or (variable.tfNow and spells.TIGERS_FURY:cooldown_up()) then
@@ -417,13 +456,6 @@ local function on_update()
     else
         if combo_points <= 4 then
             if actionList.builder(target, spell_targets, combo_points, energy) then return end
-        end
-    end
-
-    if me:has_buff(lists.BUFFS.PREDATORY_SWIFTNESS) and variable.regrowth then
-        local hp_pct = me:get_health_percentage()
-        if hp_pct < 80 then
-            if spells.REGROWTH:cast(me, "Regrowth (Swiftness)") then return end
         end
     end
 end

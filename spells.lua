@@ -67,6 +67,9 @@ local Spells = {
     -- Adding shadowmeld, berserking, potion, etc.
     SHADOWMELD = create_spell(58984),
     BERSERKING = create_spell(26297),
+    TRAVEL_FORM = create_spell(783),
+    SKULL_BASH = create_spell(106839),
+    REMOVE_CORRUPTION = create_spell(2782),
 }
 
 return Spells
