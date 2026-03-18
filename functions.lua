@@ -5,6 +5,7 @@ local lists = require("lists")
 local target_selector = require("common/modules/target_selector")
 local health_pred = require("common/modules/health_prediction")
 local buff_manager = require("common/modules/buff_manager")
+local unit_helper = require("common/utility/unit_helper")
 
 local Functions = {}
 
@@ -63,13 +64,14 @@ end
 
 function Functions.get_dps_target(range)
     range = range or 5
+    local me = core.object_manager.get_local_player()
     -- always prioritize checking current target first
-    local target = core.object_manager.get_local_player():get_target()
+    local target = me:get_target()
     if target and Functions.validate_enemy(target, range, true) then
         return target
     end
     -- Fallback to nearest
-    local raw_enemies = target_selector:get_targets()
+    local raw_enemies = unit_helper:get_enemy_list_around(me:get_position(), range, false, false)
     local best_enemy = nil
     local min_dist = 999
     for _, enemy in ipairs(raw_enemies) do
@@ -85,7 +87,8 @@ function Functions.get_dps_target(range)
 end
 
 function Functions.count_enemies_in_range(range)
-    local raw_enemies = target_selector:get_targets()
+    local me = core.object_manager.get_local_player()
+    local raw_enemies = unit_helper:get_enemy_list_around(me:get_position(), range, false, false)
     local count = 0
     for _, enemy in ipairs(raw_enemies) do
         if Functions.validate_enemy(enemy, range, false) then
@@ -96,7 +99,8 @@ function Functions.count_enemies_in_range(range)
 end
 
 function Functions.get_all_enemies_in_range(range)
-    local raw_enemies = target_selector:get_targets()
+    local me = core.object_manager.get_local_player()
+    local raw_enemies = unit_helper:get_enemy_list_around(me:get_position(), range, false, false)
     local enemies = {}
     for _, enemy in ipairs(raw_enemies) do
         if Functions.validate_enemy(enemy, range, true) then
@@ -129,7 +133,8 @@ function Functions.get_best_dot_target(debuff_id, range, refresh_time, current_t
 end
 
 function Functions.get_interrupt_target(range)
-    local raw_enemies = target_selector:get_targets()
+    local me = core.object_manager.get_local_player()
+    local raw_enemies = unit_helper:get_enemy_list_around(me:get_position(), range, false, false)
     local now = core.game_time()
     for _, enemy in ipairs(raw_enemies) do
         if Functions.validate_enemy(enemy, range, false) then
