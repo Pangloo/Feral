@@ -140,13 +140,18 @@ actionList.cooldown = function(target, spell_targets)
     local has_bs = me:has_buff(lists.BUFFS.BERSERK) or me:has_buff(lists.BUFFS.INCARNATION)
 
     -- feral_frenzy
-    if talent.frantic_frenzy then
-        if core.spell_book.is_spell_learned(spells.FRANTIC_FRENZY.id) and spells.FRANTIC_FRENZY:cooldown_up() then
-            if spells.FRANTIC_FRENZY:cast(target, "Frantic Frenzy") then return true end
-        end
-    else
-        if spells.FERAL_FRENZY:cooldown_up() then
-            if spells.FERAL_FRENZY:cast(target, "Feral Frenzy") then return true end
+    local frenzy_tf_only = menu.FRENZY_TF_ONLY:get_state()
+    local can_cast_frenzy = not frenzy_tf_only or has_tf
+
+    if can_cast_frenzy then
+        if talent.frantic_frenzy then
+            if core.spell_book.is_spell_learned(spells.FRANTIC_FRENZY.id) and spells.FRANTIC_FRENZY:cooldown_up() then
+                if spells.FRANTIC_FRENZY:cast(target, "Frantic Frenzy") then return true end
+            end
+        else
+            if spells.FERAL_FRENZY:cooldown_up() then
+                if spells.FERAL_FRENZY:cast(target, "Feral Frenzy") then return true end
+            end
         end
     end
 
@@ -155,8 +160,13 @@ actionList.cooldown = function(target, spell_targets)
         local has_bs = me:has_buff(lists.BUFFS.BERSERK)
         if has_bs or (has_tf and not variable.holdConvoke) then
             if spell_targets >= 2 then
-                if combo_points < 3 then
-                    if spells.CONVOKE_THE_SPIRITS:cast(me, "Convoke (AoE)") then return true end
+                local tf_remains = funcs.get_buff_remains(me, lists.BUFFS.TIGERS_FURY)
+                local tf_expiring = tf_remains > 0 and tf_remains < 3
+                local rip_thresh = tf_expiring and 22 or 5.0
+                local rip_target = funcs.get_best_dot_target(lists.DEBUFFS.RIP, 8, rip_thresh, target)
+
+                if not rip_target then
+                    if spells.CONVOKE_THE_SPIRITS:cast(me, "Convoke (AoE no Rip target)") then return true end
                 end
             else
                 if spells.CONVOKE_THE_SPIRITS:cast(me, "Convoke") then return true end
