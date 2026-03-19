@@ -20,17 +20,10 @@ local fight_remains = 300 -- mocked
 
 local variable = {
     regrowth = false,
-    use_custom_timers = false,
     combat_start_time = 0,
-    nextTFTimer = 0,
-    nextBSTimer = 1,
     dotc_rake_threshold = 5,
     algethar_puzzle_box_precombat_cast = 3,
     tfRemains = 0,
-    tfNow = false,
-    currentTFTimer = -10,
-    currentBSTimer = -10,
-    zerkNow = false,
 
     convokeCountRemaining = 0,
     zerkCountRemaining = 0,
@@ -76,10 +69,6 @@ local function update_variables()
 
     if not me:affecting_combat() then
         variable.combat_start_time = 0
-        variable.nextTFTimer = 0
-        variable.nextBSTimer = 1
-        variable.currentTFTimer = -10
-        variable.currentBSTimer = -10
     elseif variable.combat_start_time == 0 then
         variable.combat_start_time = time
     end
@@ -87,21 +76,20 @@ local function update_variables()
     local combat_time = variable.combat_start_time > 0 and (time - variable.combat_start_time) or 0
 
     variable.regrowth = menu.REGROWTH:get_state()
-    variable.use_custom_timers = menu.USE_CUSTOM_TIMERS:get_state()
 
     -- Update Talents
-    talent.wild_slashes = spells.WILD_SLASHES:is_learned()
-    talent.infected_wounds = spells.INFECTED_WOUNDS:is_learned()
-    talent.berserk_heart_of_the_lion = spells.BERSERK_HEART_OF_THE_LION:is_learned()
-    talent.frantic_frenzy = spells.FRANTIC_FRENZY:is_learned()
-    talent.doubleclawed_rake = spells.DOUBLECLAWED_RAKE:is_learned()
-    talent.lunar_inspiration = spells.LUNAR_INSPIRATION:is_learned()
-    talent.panthers_guile = spells.PANTHERS_GUILE:is_learned()
-    talent.primal_wrath = spells.PRIMAL_WRATH:is_learned()
-    talent.rampant_ferocity = spells.RAMPANT_FEROCITY:is_learned()
-    talent.saber_jaws = spells.SABER_JAWS:is_learned()
-    talent.ashamanes_guidance = spells.ASHAMANES_GUIDANCE:is_learned()
-    talent.convoke_the_spirits = spells.CONVOKE_THE_SPIRITS:is_learned()
+    talent.wild_slashes = core.spell_book.is_spell_learned(spells.WILD_SLASHES.id)
+    talent.infected_wounds = core.spell_book.is_spell_learned(spells.INFECTED_WOUNDS.id)
+    talent.berserk_heart_of_the_lion = core.spell_book.is_spell_learned(spells.BERSERK_HEART_OF_THE_LION.id)
+    talent.frantic_frenzy = core.spell_book.is_spell_learned(spells.FRANTIC_FRENZY.id)
+    talent.doubleclawed_rake = core.spell_book.is_spell_learned(spells.DOUBLECLAWED_RAKE.id)
+    talent.lunar_inspiration = core.spell_book.is_spell_learned(spells.LUNAR_INSPIRATION.id)
+    talent.panthers_guile = core.spell_book.is_spell_learned(spells.PANTHERS_GUILE.id)
+    talent.primal_wrath = core.spell_book.is_spell_learned(spells.PRIMAL_WRATH.id)
+    talent.rampant_ferocity = core.spell_book.is_spell_learned(spells.RAMPANT_FEROCITY.id)
+    talent.saber_jaws = core.spell_book.is_spell_learned(spells.SABER_JAWS.id)
+    talent.ashamanes_guidance = core.spell_book.is_spell_learned(spells.ASHAMANES_GUIDANCE.id)
+    talent.convoke_the_spirits = core.spell_book.is_spell_learned(spells.CONVOKE_THE_SPIRITS.id)
 
     if talent.wild_slashes and not talent.infected_wounds then
         variable.dotc_rake_threshold = 3
@@ -111,15 +99,7 @@ local function update_variables()
         variable.dotc_rake_threshold = 5
     end
 
-    if variable.use_custom_timers then
-        if variable.tfNow then
-            variable.tfRemains = 0
-        else
-            variable.tfRemains = math.max(0, variable.nextTFTimer - combat_time)
-        end
-    else
-        variable.tfRemains = spells.TIGERS_FURY:cooldown_remains()
-    end
+    variable.tfRemains = spells.TIGERS_FURY:cooldown_remains()
 end
 
 --------------------------------------------------------------------------------
@@ -131,35 +111,15 @@ local actionList = {}
 actionList.cd_variable = function()
     local combat_time = variable.combat_start_time > 0 and (time - variable.combat_start_time) or 0
     -- Mocked math for cooldown variable tracking
-    variable.bs_inc_cd = not variable.use_custom_timers and (spells.BERSERK:cooldown_remains() + 10) or
-        (variable.nextBSTimer - combat_time + 10)
+    variable.bs_inc_cd = spells.BERSERK:cooldown_remains() + 10
     variable.convoke_cd = spells.CONVOKE_THE_SPIRITS:cooldown_remains() + 10
 
     local cds_enabled = menu.USE_COOLDOWNS:get_state()
-    variable.holdBerserk = not cds_enabled or variable.firstHoldBerserkCondition or variable.secondHoldBerserkCondition or
-        (variable.use_custom_timers and (variable.nextBSTimer - 5 > combat_time) and not variable.zerkNow)
+    variable.holdBerserk = not cds_enabled or variable.firstHoldBerserkCondition or variable.secondHoldBerserkCondition
     variable.holdConvoke = not cds_enabled
 end
 
--- APL: custom_timers
-actionList.custom_timers = function()
-    local combat_time = variable.combat_start_time > 0 and (time - variable.combat_start_time) or 0
 
-    if combat_time > variable.nextTFTimer then
-        variable.currentTFTimer = variable.nextTFTimer
-        variable.nextTFTimer = variable.currentTFTimer + 30
-    end
-    if combat_time > variable.nextBSTimer then
-        variable.currentBSTimer = variable.nextBSTimer
-        variable.nextBSTimer = variable.currentBSTimer + 180
-    end
-
-    variable.use_custom_timers = menu.USE_CUSTOM_TIMERS:get_state()
-    variable.tfNow = variable.use_custom_timers and
-        ((variable.currentTFTimer + 4 > combat_time) and (combat_time >= variable.currentTFTimer))
-    variable.zerkNow = variable.use_custom_timers and
-        ((variable.currentBSTimer + 4 > combat_time) and (combat_time >= variable.currentBSTimer))
-end
 
 -- APL: cooldown
 actionList.cooldown = function(target, spell_targets)
@@ -168,10 +128,10 @@ actionList.cooldown = function(target, spell_targets)
     local has_tf = me:has_buff(lists.BUFFS.TIGERS_FURY)
 
     -- incarnation / berserk
-    if has_tf and not variable.holdBerserk and not variable.use_custom_timers or variable.zerkNow then
-        if spells.INCARNATION:is_learned() and spells.INCARNATION:cooldown_up() then
+    if has_tf and not variable.holdBerserk then
+        if core.spell_book.is_spell_learned(spells.INCARNATION.id) and spells.INCARNATION:cooldown_up() then
             if spells.INCARNATION:cast(me, "Incarnation") then return true end
-        elseif spells.BERSERK:is_learned() and spells.BERSERK:cooldown_up() then
+        elseif core.spell_book.is_spell_learned(spells.BERSERK.id) and spells.BERSERK:cooldown_up() then
             if spells.BERSERK:cast(me, "Berserk") then return true end
         end
     end
@@ -181,22 +141,26 @@ actionList.cooldown = function(target, spell_targets)
 
     -- feral_frenzy
     if talent.frantic_frenzy then
-        if spells.FRANTIC_FRENZY:is_learned() and spells.FRANTIC_FRENZY:cooldown_up() then
+        if core.spell_book.is_spell_learned(spells.FRANTIC_FRENZY.id) and spells.FRANTIC_FRENZY:cooldown_up() then
             if spells.FRANTIC_FRENZY:cast(target, "Frantic Frenzy") then return true end
         end
     else
-        if spells.FERAL_FRENZY:is_learned() and spells.FERAL_FRENZY:cooldown_up() then
-            if combo_points <= 2 + (has_bs and 2 or 0) then
-                if spells.FERAL_FRENZY:cast(target, "Feral Frenzy") then return true end
-            end
+        if spells.FERAL_FRENZY:cooldown_up() then
+            if spells.FERAL_FRENZY:cast(target, "Feral Frenzy") then return true end
         end
     end
 
     -- convoke_the_spirits
-    if spells.CONVOKE_THE_SPIRITS:is_learned() and spells.CONVOKE_THE_SPIRITS:cooldown_up() then
+    if core.spell_book.is_spell_learned(spells.CONVOKE_THE_SPIRITS.id) and spells.CONVOKE_THE_SPIRITS:cooldown_up() then
         local has_bs = me:has_buff(lists.BUFFS.BERSERK)
         if has_bs or (has_tf and not variable.holdConvoke) then
-            if spells.CONVOKE_THE_SPIRITS:cast(me, "Convoke") then return true end
+            if spell_targets >= 2 then
+                if combo_points < 3 then
+                    if spells.CONVOKE_THE_SPIRITS:cast(me, "Convoke (AoE)") then return true end
+                end
+            else
+                if spells.CONVOKE_THE_SPIRITS:cast(me, "Convoke") then return true end
+            end
         end
     end
     return false
@@ -204,9 +168,14 @@ end
 
 -- APL: aoe_builder
 actionList.aoe_builder = function(target, spell_targets, combo_points, energy)
+    local tf_remains = funcs.get_buff_remains(me, lists.BUFFS.TIGERS_FURY)
+    local tf_expiring = tf_remains > 0 and tf_remains < 3
+    local rake_thresh = tf_expiring and 14 or 4.5
+    local thrash_thresh = tf_expiring and 14 or 4.5
+
     -- Rake conditions simplified (Scan and Spread) - Only if targets < 4
     if spell_targets < 4 then
-        local rake_target = funcs.get_best_dot_target(lists.DEBUFFS.RAKE, 8, 4.5, target)
+        local rake_target = funcs.get_best_dot_target(lists.DEBUFFS.RAKE, 8, rake_thresh, target)
         if rake_target then
             if energy < 35 then return true end
             if spells.RAKE:cast(rake_target, "Rake (refresh/spread)") then return true end
@@ -214,8 +183,8 @@ actionList.aoe_builder = function(target, spell_targets, combo_points, energy)
     end
 
     -- Thrash
-    if spells.THRASH_CAT:is_learned() and spells.THRASH_CAT:cooldown_up() then
-        local thrash_target = funcs.get_best_dot_target(lists.DEBUFFS.THRASH, 8, 4.5, target)
+    if core.spell_book.is_spell_learned(spells.THRASH_CAT.id) and spells.THRASH_CAT:cooldown_up() then
+        local thrash_target = funcs.get_best_dot_target(lists.DEBUFFS.THRASH, 8, thrash_thresh, target)
         if thrash_target then
             if energy < 40 then return true end
             if spells.THRASH_CAT:cast(thrash_target, "Thrash (AoE)") then return true end
@@ -232,11 +201,11 @@ actionList.aoe_builder = function(target, spell_targets, combo_points, energy)
     end
 
     -- Swipe / Brutal Slash
-    if spells.BRUTAL_SLASH:is_learned() and spells.BRUTAL_SLASH:cooldown_up() then
+    if core.spell_book.is_spell_learned(spells.BRUTAL_SLASH.id) and spells.BRUTAL_SLASH:cooldown_up() then
         if me:has_buff(lists.BUFFS.SUDDEN_AMBUSH) and spell_targets >= 5 then
             if spells.BRUTAL_SLASH:cast(target, "Brutal Slash (Sudden Ambush)") then return true end
         end
-    elseif spells.SWIPE_CAT:is_learned() and spells.SWIPE_CAT:cooldown_up() then
+    elseif core.spell_book.is_spell_learned(spells.SWIPE_CAT.id) and spells.SWIPE_CAT:cooldown_up() then
         if me:has_buff(lists.BUFFS.SUDDEN_AMBUSH) and spell_targets >= 5 then
             if spells.SWIPE_CAT:cast(target, "Swipe (Sudden Ambush)") then return true end
         end
@@ -248,10 +217,10 @@ actionList.aoe_builder = function(target, spell_targets, combo_points, energy)
     end
 
     if combo_points > 1 or spell_targets > 2 or not talent.panthers_guile then
-        if spells.BRUTAL_SLASH:is_learned() and spells.BRUTAL_SLASH:cooldown_up() then
+        if core.spell_book.is_spell_learned(spells.BRUTAL_SLASH.id) and spells.BRUTAL_SLASH:cooldown_up() then
             if energy < 25 then return true end
             if spells.BRUTAL_SLASH:cast(target, "Brutal Slash") then return true end
-        elseif spells.SWIPE_CAT:is_learned() and spells.SWIPE_CAT:cooldown_up() then
+        elseif core.spell_book.is_spell_learned(spells.SWIPE_CAT.id) and spells.SWIPE_CAT:cooldown_up() then
             if energy < 35 then return true end
             if spells.SWIPE_CAT:cast(target, "Swipe") then return true end
         end
@@ -262,10 +231,13 @@ end
 -- APL: aoe_finisher
 actionList.aoe_finisher = function(target, spell_targets, combo_points, energy)
     local has_bs = me:has_buff(lists.BUFFS.BERSERK) or me:has_buff(lists.BUFFS.INCARNATION)
+    local tf_remains = funcs.get_buff_remains(me, lists.BUFFS.TIGERS_FURY)
+    local tf_expiring = tf_remains > 0 and tf_remains < 3
+    local rip_thresh = tf_expiring and 22 or 5.0
 
     -- Primal Wrath: Only cast if a target in range has the dot expiring within 5 seconds
-    if spells.PRIMAL_WRATH:is_learned() and combo_points >= 5 and spell_targets > 1 then
-        local pw_target = funcs.get_best_dot_target(lists.DEBUFFS.RIP, 8, 5.0, target)
+    if core.spell_book.is_spell_learned(spells.PRIMAL_WRATH.id) and combo_points >= 5 and spell_targets > 1 then
+        local pw_target = funcs.get_best_dot_target(lists.DEBUFFS.RIP, 8, rip_thresh, target)
         if pw_target then
             if energy < 20 then return true end
             if spells.PRIMAL_WRATH:cast(target, "Primal Wrath") then return true end
@@ -274,7 +246,8 @@ actionList.aoe_finisher = function(target, spell_targets, combo_points, energy)
 
     -- Manual Rip Spread (Only if Primal Wrath is not learned)
     if not talent.primal_wrath and combo_points >= 4 then
-        local rip_target = funcs.get_best_dot_target(lists.DEBUFFS.RIP, 8, 7, target)
+        local rip_spread_thresh = tf_expiring and 22 or 7
+        local rip_target = funcs.get_best_dot_target(lists.DEBUFFS.RIP, 8, rip_spread_thresh, target)
         if rip_target then
             if energy < 30 then return true end
             if spells.RIP:cast(rip_target, "Rip (spread)") then return true end
@@ -294,15 +267,19 @@ end
 
 -- APL: builder
 actionList.builder = function(target, spell_targets, combo_points, energy)
+    local tf_remains = funcs.get_buff_remains(me, lists.BUFFS.TIGERS_FURY)
+    local tf_expiring = tf_remains > 0 and tf_remains < 3
+    local rake_thresh = tf_expiring and 14 or 4.5
+
     local is_prowled = me:has_buff(lists.BUFFS.PROWL) or me:has_buff(lists.BUFFS.SHADOWMELD)
-    if not is_prowled and funcs.get_debuff_remains(target, lists.DEBUFFS.RAKE) < 4.5 then
-        if spells.SHADOWMELD:is_learned() and spells.SHADOWMELD:cooldown_up() then
+    if not is_prowled and funcs.get_debuff_remains(target, lists.DEBUFFS.RAKE) < rake_thresh then
+        if core.spell_book.is_spell_learned(spells.SHADOWMELD.id) and spells.SHADOWMELD:cooldown_up() then
             if spells.SHADOWMELD:cast(me, "Shadowmeld") then return true end
         end
     end
 
     -- Ensure basic Rake uptime securely and spread if able
-    local rake_target = funcs.get_best_dot_target(lists.DEBUFFS.RAKE, 8, 4.5, target)
+    local rake_target = funcs.get_best_dot_target(lists.DEBUFFS.RAKE, 8, rake_thresh, target)
     if rake_target then
         if energy < 35 then return true end
         if spells.RAKE:cast(rake_target, "Rake") then return true end
@@ -324,8 +301,12 @@ end
 
 -- APL: finisher
 actionList.finisher = function(target, spell_targets, combo_points, energy)
+    local tf_remains = funcs.get_buff_remains(me, lists.BUFFS.TIGERS_FURY)
+    local tf_expiring = tf_remains > 0 and tf_remains < 3
+    local rip_thresh = tf_expiring and 22 or 7
+
     if combo_points >= 4 then
-        local rip_target = funcs.get_best_dot_target(lists.DEBUFFS.RIP, 8, 7, target)
+        local rip_target = funcs.get_best_dot_target(lists.DEBUFFS.RIP, 8, rip_thresh, target)
         if rip_target then
             if energy < 30 then return true end
             if spells.RIP:cast(rip_target, "Rip") then return true end
@@ -343,7 +324,7 @@ end
 -- APL: utility
 actionList.utility = function()
     if not menu.AUTO_INTERRUPT:get_state() then return false end
-    if not spells.SKULL_BASH:is_learned() or not spells.SKULL_BASH:cooldown_up() then return false end
+    if not core.spell_book.is_spell_learned(spells.SKULL_BASH.id) or not spells.SKULL_BASH:cooldown_up() then return false end
 
     local target = funcs.get_interrupt_target(13) -- Skull Bash range is 13 yards
     if target then
@@ -353,7 +334,8 @@ actionList.utility = function()
     -- Dispel
     local dispel_target, debuff_id, debuff_type = funcs.check_all_dispels(40)
     if dispel_target then
-        return spells.REMOVE_CORRUPTION:cast(dispel_target, "Remove Corruption (" .. tostring(debuff_id) .. ")", { skip_facing = true })
+        return spells.REMOVE_CORRUPTION:cast(dispel_target, "Remove Corruption (" .. tostring(debuff_id) .. ")",
+            { skip_facing = true })
     end
 
     return false
@@ -418,14 +400,11 @@ local function on_update()
     local is_prowled = me:has_buff(lists.BUFFS.PROWL) or me:has_buff(lists.BUFFS.SHADOWMELD)
 
     -- APL Main Loop
-    if variable.use_custom_timers then
-        actionList.custom_timers()
-    end
 
     if actionList.utility() then return end
 
     local tf_dur = 10 -- aprox duration
-    if (not variable.use_custom_timers and (spells.TIGERS_FURY:cooldown_remains() < tf_dur - 1.5)) or (variable.tfNow and spells.TIGERS_FURY:cooldown_up()) then
+    if spells.TIGERS_FURY:cooldown_remains() < tf_dur - 1.5 then
         if spells.TIGERS_FURY:cast(me, "Tiger's Fury") then return end
     end
 
