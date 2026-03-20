@@ -143,7 +143,7 @@ actionList.cooldown = function(target, spell_targets)
     local frenzy_tf_only = menu.FRENZY_TF_ONLY:get_state()
     local can_cast_frenzy = not frenzy_tf_only or has_tf
 
-    if can_cast_frenzy then
+    if can_cast_frenzy and funcs.get_group_time_to_die(8) >= 12 then
         if talent.frantic_frenzy then
             if core.spell_book.is_spell_learned(spells.FRANTIC_FRENZY.id) and spells.FRANTIC_FRENZY:cooldown_up() then
                 if spells.FRANTIC_FRENZY:cast(target, "Frantic Frenzy") then return true end
@@ -162,8 +162,8 @@ actionList.cooldown = function(target, spell_targets)
             if spell_targets >= 2 then
                 local tf_remains = funcs.get_buff_remains(me, lists.BUFFS.TIGERS_FURY)
                 local tf_expiring = tf_remains > 0 and tf_remains < 3
-                local rip_thresh = tf_expiring and 22 or 5.0
-                local rip_target = funcs.get_best_dot_target(lists.DEBUFFS.RIP, 8, rip_thresh, target)
+                local rip_thresh = tf_expiring and 10 or 5.0
+                local rip_target = funcs.get_best_dot_target(lists.DEBUFFS.RIP, spells.RIP.id, rip_thresh, target, 7)
 
                 if not rip_target then
                     if spells.CONVOKE_THE_SPIRITS:cast(me, "Convoke (AoE no Rip target)") then return true end
@@ -180,12 +180,12 @@ end
 actionList.aoe_builder = function(target, spell_targets, combo_points, energy)
     local tf_remains = funcs.get_buff_remains(me, lists.BUFFS.TIGERS_FURY)
     local tf_expiring = tf_remains > 0 and tf_remains < 3
-    local rake_thresh = tf_expiring and 14 or 4.5
-    local thrash_thresh = tf_expiring and 14 or 4.5
+    local rake_thresh = tf_expiring and 10 or 4.5
+    local thrash_thresh = tf_expiring and 10 or 4.5
 
     -- Rake conditions simplified (Scan and Spread) - Only if targets < 4
     if spell_targets < 4 then
-        local rake_target = funcs.get_best_dot_target(lists.DEBUFFS.RAKE, 8, rake_thresh, target)
+        local rake_target = funcs.get_best_dot_target(lists.DEBUFFS.RAKE, spells.RAKE.id, rake_thresh, target, 7)
         if rake_target then
             if energy < 35 then return true end
             if spells.RAKE:cast(rake_target, "Rake (refresh/spread)") then return true end
@@ -194,7 +194,8 @@ actionList.aoe_builder = function(target, spell_targets, combo_points, energy)
 
     -- Thrash
     if core.spell_book.is_spell_learned(spells.THRASH_CAT.id) and spells.THRASH_CAT:cooldown_up() then
-        local thrash_target = funcs.get_best_dot_target(lists.DEBUFFS.THRASH, 8, thrash_thresh, target)
+        local thrash_target = funcs.get_best_dot_target(lists.DEBUFFS.THRASH, spells.THRASH_CAT.id, thrash_thresh, target,
+            7)
         if thrash_target then
             if energy < 40 then return true end
             if spells.THRASH_CAT:cast(thrash_target, "Thrash (AoE)") then return true end
@@ -203,7 +204,7 @@ actionList.aoe_builder = function(target, spell_targets, combo_points, energy)
 
     -- Moonfire (Lunar Inspiration) - Only prioritized dynamically on lower target counts
     if talent.lunar_inspiration and spell_targets <= 3 then
-        local moonfire_target = funcs.get_best_dot_target(lists.DEBUFFS.MOONFIRE, 8, 4.2, target)
+        local moonfire_target = funcs.get_best_dot_target(lists.DEBUFFS.MOONFIRE, spells.MOONFIRE_CAT.id, 4.2, target, 7)
         if moonfire_target then
             if energy < 30 then return true end
             if spells.MOONFIRE_CAT:cast(moonfire_target, "Moonfire (AoE)") then return true end
@@ -213,11 +214,11 @@ actionList.aoe_builder = function(target, spell_targets, combo_points, energy)
     -- Swipe / Brutal Slash
     if core.spell_book.is_spell_learned(spells.BRUTAL_SLASH.id) and spells.BRUTAL_SLASH:cooldown_up() then
         if me:has_buff(lists.BUFFS.SUDDEN_AMBUSH) and spell_targets >= 5 then
-            if spells.BRUTAL_SLASH:cast(target, "Brutal Slash (Sudden Ambush)") then return true end
+            if spells.BRUTAL_SLASH:cast(me, "Brutal Slash (Sudden Ambush)") then return true end
         end
     elseif core.spell_book.is_spell_learned(spells.SWIPE_CAT.id) and spells.SWIPE_CAT:cooldown_up() then
         if me:has_buff(lists.BUFFS.SUDDEN_AMBUSH) and spell_targets >= 5 then
-            if spells.SWIPE_CAT:cast(target, "Swipe (Sudden Ambush)") then return true end
+            if spells.SWIPE_CAT:cast(me, "Swipe (Sudden Ambush)") then return true end
         end
     end
 
@@ -229,10 +230,10 @@ actionList.aoe_builder = function(target, spell_targets, combo_points, energy)
     if combo_points > 1 or spell_targets > 2 or not talent.panthers_guile then
         if core.spell_book.is_spell_learned(spells.BRUTAL_SLASH.id) and spells.BRUTAL_SLASH:cooldown_up() then
             if energy < 25 then return true end
-            if spells.BRUTAL_SLASH:cast(target, "Brutal Slash") then return true end
+            if spells.BRUTAL_SLASH:cast(me, "Brutal Slash") then return true end
         elseif core.spell_book.is_spell_learned(spells.SWIPE_CAT.id) and spells.SWIPE_CAT:cooldown_up() then
             if energy < 35 then return true end
-            if spells.SWIPE_CAT:cast(target, "Swipe") then return true end
+            if spells.SWIPE_CAT:cast(me, "Swipe") then return true end
         end
     end
     return false
@@ -243,21 +244,21 @@ actionList.aoe_finisher = function(target, spell_targets, combo_points, energy)
     local has_bs = me:has_buff(lists.BUFFS.BERSERK) or me:has_buff(lists.BUFFS.INCARNATION)
     local tf_remains = funcs.get_buff_remains(me, lists.BUFFS.TIGERS_FURY)
     local tf_expiring = tf_remains > 0 and tf_remains < 3
-    local rip_thresh = tf_expiring and 22 or 5.0
+    local rip_thresh = tf_expiring and 10 or 5.0
 
     -- Primal Wrath: Only cast if a target in range has the dot expiring within 5 seconds
     if core.spell_book.is_spell_learned(spells.PRIMAL_WRATH.id) and combo_points >= 5 and spell_targets > 1 then
-        local pw_target = funcs.get_best_dot_target(lists.DEBUFFS.RIP, 8, rip_thresh, target)
+        local pw_target = funcs.get_best_dot_target(lists.DEBUFFS.RIP, spells.PRIMAL_WRATH.id, rip_thresh, target, 7)
         if pw_target then
             if energy < 20 then return true end
-            if spells.PRIMAL_WRATH:cast(target, "Primal Wrath") then return true end
+            if spells.PRIMAL_WRATH:cast(me, "Primal Wrath") then return true end
         end
     end
 
     -- Manual Rip Spread (Only if Primal Wrath is not learned)
     if not talent.primal_wrath and combo_points >= 4 then
-        local rip_spread_thresh = tf_expiring and 22 or 7
-        local rip_target = funcs.get_best_dot_target(lists.DEBUFFS.RIP, 8, rip_spread_thresh, target)
+        local rip_spread_thresh = tf_expiring and 10 or 7
+        local rip_target = funcs.get_best_dot_target(lists.DEBUFFS.RIP, spells.RIP.id, rip_spread_thresh, target, 7)
         if rip_target then
             if energy < 30 then return true end
             if spells.RIP:cast(rip_target, "Rip (spread)") then return true end
@@ -279,7 +280,7 @@ end
 actionList.builder = function(target, spell_targets, combo_points, energy)
     local tf_remains = funcs.get_buff_remains(me, lists.BUFFS.TIGERS_FURY)
     local tf_expiring = tf_remains > 0 and tf_remains < 3
-    local rake_thresh = tf_expiring and 14 or 4.5
+    local rake_thresh = tf_expiring and 10 or 4.5
 
     local is_prowled = me:has_buff(lists.BUFFS.PROWL) or me:has_buff(lists.BUFFS.SHADOWMELD)
     if not is_prowled and funcs.get_debuff_remains(target, lists.DEBUFFS.RAKE) < rake_thresh then
@@ -289,7 +290,7 @@ actionList.builder = function(target, spell_targets, combo_points, energy)
     end
 
     -- Ensure basic Rake uptime securely and spread if able
-    local rake_target = funcs.get_best_dot_target(lists.DEBUFFS.RAKE, 8, rake_thresh, target)
+    local rake_target = funcs.get_best_dot_target(lists.DEBUFFS.RAKE, spells.RAKE.id, rake_thresh, target, 7)
     if rake_target then
         if energy < 35 then return true end
         if spells.RAKE:cast(rake_target, "Rake") then return true end
@@ -297,7 +298,7 @@ actionList.builder = function(target, spell_targets, combo_points, energy)
 
     -- Moonfire (Lunar Inspiration)
     if talent.lunar_inspiration then
-        local moonfire_target = funcs.get_best_dot_target(lists.DEBUFFS.MOONFIRE, 8, 4.2, target)
+        local moonfire_target = funcs.get_best_dot_target(lists.DEBUFFS.MOONFIRE, spells.MOONFIRE_CAT.id, 4.2, target, 7)
         if moonfire_target then
             if energy < 30 then return true end
             if spells.MOONFIRE_CAT:cast(moonfire_target, "Moonfire") then return true end
@@ -313,10 +314,10 @@ end
 actionList.finisher = function(target, spell_targets, combo_points, energy)
     local tf_remains = funcs.get_buff_remains(me, lists.BUFFS.TIGERS_FURY)
     local tf_expiring = tf_remains > 0 and tf_remains < 3
-    local rip_thresh = tf_expiring and 22 or 7
+    local rip_thresh = tf_expiring and 10 or 7
 
     if combo_points >= 4 then
-        local rip_target = funcs.get_best_dot_target(lists.DEBUFFS.RIP, 8, rip_thresh, target)
+        local rip_target = funcs.get_best_dot_target(lists.DEBUFFS.RIP, spells.RIP.id, rip_thresh, target, 7)
         if rip_target then
             if energy < 30 then return true end
             if spells.RIP:cast(rip_target, "Rip") then return true end
@@ -368,7 +369,7 @@ local function on_update()
 
     local spell_targets = funcs.count_enemies_in_range(8)
     local combo_points = me:get_power(4) or 0
-    local target = funcs.get_dps_target(6)
+    local target = funcs.get_dps_target()
 
     -- Precombat
     if not me:affecting_combat() then
@@ -414,7 +415,7 @@ local function on_update()
     if actionList.utility() then return end
 
     local tf_dur = 10 -- aprox duration
-    if spells.TIGERS_FURY:cooldown_remains() < tf_dur - 1.5 then
+    if spells.TIGERS_FURY:cooldown_remains() < tf_dur - 1.5 and funcs.get_group_time_to_die(8) >= 12 then
         if spells.TIGERS_FURY:cast(me, "Tiger's Fury") then return end
     end
 
