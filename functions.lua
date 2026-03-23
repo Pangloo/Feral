@@ -45,10 +45,10 @@ local last_ttd_clear = 0
 
 function Functions.get_time_to_die(unit)
     if not unit or not unit:is_valid() or unit:is_dead() then return 0 end
-    
+
     local guid = tostring(unit:get_guid())
     local now = core.time()
-    
+
     -- Cleanup cache every 30 seconds
     if now - last_ttd_clear > 30000 then
         for k, v in pairs(ttd_cache) do
@@ -58,50 +58,64 @@ function Functions.get_time_to_die(unit)
         end
         last_ttd_clear = now
     end
-    
+
     local health = unit:get_health()
     local max_health = unit:get_max_health()
     if max_health == 0 then return 9999 end
-    
+    local health_pct = unit:get_health_percentage()
+
     if not ttd_cache[guid] then
         ttd_cache[guid] = { history = {}, last_seen = now }
     end
-    
+
     ttd_cache[guid].last_seen = now
     local history = ttd_cache[guid].history
-    
+
     -- Insert once every 500ms to avoid bloating
     if #history == 0 or (now - history[#history].time >= 500) then
         table.insert(history, { time = now, health = health })
     end
-    
+
     -- Keep only the last 8 seconds of history
     while #history > 0 and (now - history[1].time > 8000) do
         table.remove(history, 1)
     end
-    
+
+    -- Fallback TTD based on health percentage if history isn't useful
+    -- We assume roughly 1.5% health loss per second as a conservative estimate for new targets
+    local fallback_ttd = health_pct / 1.5
+    if health_pct > 50 then fallback_ttd = 9999 end
+
     if #history < 2 then
-        return 9999 -- Not enough data
+        return fallback_ttd
     end
-    
+
     local first = history[1]
     local last = history[#history]
-    
+
     local time_diff = (last.time - first.time) / 1000.0
-    if time_diff <= 1.0 then return 9999 end 
-    
+    if time_diff <= 0.5 then
+        return fallback_ttd
+    end
+
     local health_diff = first.health - last.health
-    if health_diff <= 0 then return 9999 end 
-    
+    if health_diff <= 0 then
+        -- No recent damage detected.
+        -- If health is high (e.g. boss pooling), assume it will live.
+        -- If health is low, use the fallback to avoid wasting CDs.
+        return health_pct > 30 and 9999 or fallback_ttd
+    end
+
     local dps = health_diff / time_diff
-    local ttd = last.health / dps
-    return ttd
+    if dps <= 0 then return fallback_ttd end
+
+    return last.health / dps
 end
 
 function Functions.get_group_time_to_die(range)
     local enemies = Functions.get_all_enemies_in_range(range)
     if #enemies == 0 then return 0 end
-    
+
     local max_ttd = 0
     for _, e in ipairs(enemies) do
         local ttd = Functions.get_time_to_die(e)
@@ -135,7 +149,7 @@ end
 
 function Functions.validate_enemy(unit, spell_id, facing)
     if not unit or not unit:is_valid() or unit:is_dead() or unit:is_player() then return false end
-    
+
     local me = core.object_manager.get_local_player()
     if spell_id then
         local spell_helper = require("common/utility/spell_helper")
@@ -195,7 +209,11 @@ function Functions.get_all_enemies_in_range(range, spell_id)
     local enemies = {}
     for _, enemy in ipairs(raw_enemies) do
         local target_spell = spell_id or spells.THRASH_CAT.id
-        if Functions.validate_enemy(enemy, target_spell, true) then
+        local facingcheck = true
+        if spell_id == spells.PRIMAL_WRATH.id then
+            facingcheck = false
+        end
+        if Functions.validate_enemy(enemy, target_spell, facingcheck) then
             table.insert(enemies, enemy)
         end
     end
@@ -204,7 +222,11 @@ end
 
 function Functions.get_best_dot_target(debuff_id, spell_id, refresh_time, current_target, min_ttd)
     min_ttd = min_ttd or 0
-    if current_target and Functions.validate_enemy(current_target, spell_id, true) then
+    local facingcheck = true
+    if spell_id == spells.PRIMAL_WRATH.id then
+        facingcheck = false
+    end
+    if current_target and Functions.validate_enemy(current_target, spell_id, facingcheck) then
         if Functions.get_debuff_remains(current_target, debuff_id) < refresh_time and Functions.get_time_to_die(current_target) >= min_ttd then
             return current_target
         end
@@ -227,6 +249,20 @@ function Functions.get_best_dot_target(debuff_id, spell_id, refresh_time, curren
     end
 
     return best_target
+end
+
+function Functions.any_missing_rip(range, threshold, min_ttd)
+    local me = core.object_manager.get_local_player()
+    local raw_enemies = unit_helper:get_enemy_list_around(me:get_position(), range + 5, false, false)
+    for _, enemy in ipairs(raw_enemies) do
+        if Functions.validate_enemy(enemy, nil, false) and enemy:distance() <= range then
+            local remains = Functions.get_debuff_remains(enemy, lists.DEBUFFS.RIP)
+            if remains < (threshold or 5) and Functions.get_time_to_die(enemy) >= (min_ttd or 7) then
+                return true
+            end
+        end
+    end
+    return false
 end
 
 function Functions.get_interrupt_target(range)

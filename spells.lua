@@ -11,7 +11,7 @@ local function create_spell(id)
             return not spell_helper:is_spell_on_cooldown(self.id)
         end,
         cooldown_remains = function(self)
-            local current, total = spell_helper:get_remaining_charge_cooldown(self.id)
+            local current = core.spell_book.get_spell_cooldown(self.id)
             return current or 0
         end,
         cast = function(self, target, reason, options)

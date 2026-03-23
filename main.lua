@@ -99,7 +99,7 @@ local function update_variables()
         variable.dotc_rake_threshold = 5
     end
 
-    variable.tfRemains = spells.TIGERS_FURY:cooldown_remains()
+    variable.tfRemains = core.spell_book.get_spell_cooldown(spells.TIGERS_FURY.id)
 end
 
 --------------------------------------------------------------------------------
@@ -111,8 +111,8 @@ local actionList = {}
 actionList.cd_variable = function()
     local combat_time = variable.combat_start_time > 0 and (time - variable.combat_start_time) or 0
     -- Mocked math for cooldown variable tracking
-    variable.bs_inc_cd = spells.BERSERK:cooldown_remains() + 10
-    variable.convoke_cd = spells.CONVOKE_THE_SPIRITS:cooldown_remains() + 10
+    variable.bs_inc_cd = core.spell_book.get_spell_cooldown(spells.BERSERK.id) + 10
+    variable.convoke_cd = core.spell_book.get_spell_cooldown(spells.CONVOKE_THE_SPIRITS.id) + 10
 
     local cds_enabled = menu.USE_COOLDOWNS:get_state()
     variable.holdBerserk = not cds_enabled or variable.firstHoldBerserkCondition or variable.secondHoldBerserkCondition
@@ -157,19 +157,9 @@ actionList.cooldown = function(target, spell_targets)
 
     -- convoke_the_spirits
     if core.spell_book.is_spell_learned(spells.CONVOKE_THE_SPIRITS.id) and spells.CONVOKE_THE_SPIRITS:cooldown_up() then
-        local has_bs = me:has_buff(lists.BUFFS.BERSERK)
         if has_bs or (has_tf and not variable.holdConvoke) then
-            if spell_targets >= 2 then
-                local tf_remains = funcs.get_buff_remains(me, lists.BUFFS.TIGERS_FURY)
-                local tf_expiring = tf_remains > 0 and tf_remains < 3
-                local rip_thresh = tf_expiring and 10 or 5.0
-                local rip_target = funcs.get_best_dot_target(lists.DEBUFFS.RIP, spells.RIP.id, rip_thresh, target, 7)
-
-                if not rip_target then
-                    if spells.CONVOKE_THE_SPIRITS:cast(me, "Convoke (AoE no Rip target)") then return true end
-                end
-            else
-                if spells.CONVOKE_THE_SPIRITS:cast(me, "Convoke") then return true end
+            if not funcs.any_missing_rip(8, 5, 7) then
+                if spells.CONVOKE_THE_SPIRITS:cast(me, "Convoke (All Rip up)") then return true end
             end
         end
     end
@@ -180,8 +170,8 @@ end
 actionList.aoe_builder = function(target, spell_targets, combo_points, energy)
     local tf_remains = funcs.get_buff_remains(me, lists.BUFFS.TIGERS_FURY)
     local tf_expiring = tf_remains > 0 and tf_remains < 3
-    local rake_thresh = tf_expiring and 10 or 4.5
-    local thrash_thresh = tf_expiring and 10 or 4.5
+    local rake_thresh = tf_expiring and 8 or 3.6
+    local thrash_thresh = tf_expiring and 8 or 3.6
 
     -- Rake conditions simplified (Scan and Spread) - Only if targets < 4
     if spell_targets < 4 then
@@ -392,7 +382,7 @@ local function on_update()
     end
 
     if me:affecting_combat() then
-        if not me:has_buff(lists.BUFFS.CAT_FORM) then
+        if not me:has_buff(lists.BUFFS.CAT_FORM) and not me:is_flying() then
             spells.CAT_FORM:cast(me, "Cat Form")
             return
         end
@@ -414,8 +404,24 @@ local function on_update()
 
     if actionList.utility() then return end
 
-    local tf_dur = 10 -- aprox duration
-    if spells.TIGERS_FURY:cooldown_remains() < tf_dur - 1.5 and funcs.get_group_time_to_die(8) >= 12 then
+    local tf_dur = 15 -- aprox duration
+    local function frenzy_tf_check()
+        if talent.frantic_frenzy then
+            if core.spell_book.get_spell_cooldown(spells.FRANTIC_FRENZY.id) < 12 or core.spell_book.get_spell_cooldown(spells.FRANTIC_FRENZY.id) > 19 then
+                return true
+            end
+        else
+            if core.spell_book.get_spell_cooldown(spells.FERAL_FRENZY.id) < 12 or core.spell_book.get_spell_cooldown(spells.FERAL_FRENZY.id) > 19 then
+                return true
+            end
+        end
+        if not menu.FRENZY_TF_ONLY:get_state() then return true end
+        return false
+    end
+
+    if spells.TIGERS_FURY:cooldown_up() and frenzy_tf_check() and funcs.get_group_time_to_die(8) >= 15 then
+        --core.log("Frantic frenzy cd remains: " .. tostring(core.spell_book.get_spell_cooldown(spells.FRANTIC_FRENZY.id)))
+        --core.log("Feral frenzy cd remains: " .. tostring(core.spell_book.get_spell_cooldown(spells.FERAL_FRENZY.id)))
         if spells.TIGERS_FURY:cast(me, "Tiger's Fury") then return end
     end
 
