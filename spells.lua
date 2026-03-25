@@ -63,6 +63,7 @@ local Spells = {
     RAMPANT_FEROCITY = create_spell(391709),
     SABER_JAWS = create_spell(421432),
     ASHAMANES_GUIDANCE = create_spell(391548),
+    THRIVING_GROWTH = create_spell(439528),
 
     -- Adding shadowmeld, berserking, potion, etc.
     SHADOWMELD = create_spell(58984),
@@ -70,6 +71,7 @@ local Spells = {
     TRAVEL_FORM = create_spell(783),
     SKULL_BASH = create_spell(106839),
     REMOVE_CORRUPTION = create_spell(2782),
+    MARK_OF_THE_WILD = create_spell(1126),
 }
 
 return Spells

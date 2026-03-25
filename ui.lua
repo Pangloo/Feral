@@ -21,13 +21,13 @@ local color_border = color.new(255, 255, 255, 50)    -- Border
 
 function UI.draw()
     if not win then
-        win = core.menu.window(" Feral Hotbar V3")
+        win = core.menu.window(" Feral Hotbar V4")
         win:set_initial_size(window_size)
         win:set_initial_position(vec2.new(500, 500))
     end
 
-    if win and menu.ENABLED then
-        win:set_visibility(menu.ENABLED:get_state())
+    if win and menu.ENABLED and menu.SHOW_UI then
+        win:set_visibility(menu.ENABLED:get_state() and menu.SHOW_UI:get_state())
     end
 
     tooltip_to_draw = nil
@@ -43,13 +43,13 @@ function UI.draw()
             local p_max = vec2.new(current_x + button_size.x, current_y + button_size.y)
 
             local function draw_btn(text, menu_item, tooltip_text)
-                local is_on = menu_item:get_state()
+                local is_on = menu_item:get_toggle_state()
                 local bg_color = is_on and color_enabled or color_disabled
 
                 win:render_rect_filled(p_min, p_max, bg_color, 5)
 
                 if win:is_rect_clicked(p_min, p_max) then
-                    menu_item:set(not is_on)
+                    menu_item:set_toggle_state(not is_on)
                 end
 
                 if win:is_mouse_hovering_rect(p_min, p_max) and tooltip_text then
@@ -62,7 +62,7 @@ function UI.draw()
                     p_min.y + (button_size.y - text_size.y) / 2
                 )
                 win:render_text(0, txt_offset, color_text, text)
-                
+
                 -- update p_min/p_max for next item
                 current_x = current_x + button_size.x + spacing
                 p_min = vec2.new(current_x, current_y)

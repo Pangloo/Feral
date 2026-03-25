@@ -90,6 +90,7 @@ local function update_variables()
     talent.saber_jaws = core.spell_book.is_spell_learned(spells.SABER_JAWS.id)
     talent.ashamanes_guidance = core.spell_book.is_spell_learned(spells.ASHAMANES_GUIDANCE.id)
     talent.convoke_the_spirits = core.spell_book.is_spell_learned(spells.CONVOKE_THE_SPIRITS.id)
+    talent.thriving_growth = core.spell_book.is_spell_learned(spells.THRIVING_GROWTH.id)
 
     if talent.wild_slashes and not talent.infected_wounds then
         variable.dotc_rake_threshold = 3
@@ -97,6 +98,10 @@ local function update_variables()
         variable.dotc_rake_threshold = 8
     else
         variable.dotc_rake_threshold = 5
+    end
+
+    if talent.doubleclawed_rake or talent.thriving_growth then
+        variable.dotc_rake_threshold = 50
     end
 
     variable.tfRemains = core.spell_book.get_spell_cooldown(spells.TIGERS_FURY.id)
@@ -114,7 +119,7 @@ actionList.cd_variable = function()
     variable.bs_inc_cd = core.spell_book.get_spell_cooldown(spells.BERSERK.id) + 10
     variable.convoke_cd = core.spell_book.get_spell_cooldown(spells.CONVOKE_THE_SPIRITS.id) + 10
 
-    local cds_enabled = menu.USE_COOLDOWNS:get_state()
+    local cds_enabled = menu.USE_COOLDOWNS:get_toggle_state()
     variable.holdBerserk = not cds_enabled or variable.firstHoldBerserkCondition or variable.secondHoldBerserkCondition
     variable.holdConvoke = not cds_enabled
 end
@@ -174,7 +179,7 @@ actionList.aoe_builder = function(target, spell_targets, combo_points, energy)
     local thrash_thresh = tf_expiring and 8 or 3.6
 
     -- Rake conditions simplified (Scan and Spread) - Only if targets < 4
-    if spell_targets < 4 then
+    if spell_targets <= variable.dotc_rake_threshold then
         local rake_target = funcs.get_best_dot_target(lists.DEBUFFS.RAKE, spells.RAKE.id, rake_thresh, target, 7)
         if rake_target then
             if energy < 35 then return true end
@@ -258,7 +263,7 @@ actionList.aoe_finisher = function(target, spell_targets, combo_points, energy)
     -- Ferocious Bite / Ravage (Prioritized if no dot maintenance was performed)
     local min_cp = 4 + (talent.primal_wrath and 1 or 0)
     if combo_points >= min_cp or me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING) then
-        if energy < 50 and not me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING) then return true end
+        if energy < 25 and not me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING) then return true end
         local reason = me:has_buff(lists.BUFFS.RAVAGE) and "Ferocious Bite (Ravage)" or "Ferocious Bite (AoE)"
         if spells.FEROCIOUS_BITE:cast(target, reason) then return true end
     end
@@ -280,7 +285,7 @@ actionList.builder = function(target, spell_targets, combo_points, energy)
     end
 
     -- Ensure basic Rake uptime securely and spread if able
-    local rake_target = funcs.get_best_dot_target(lists.DEBUFFS.RAKE, spells.RAKE.id, rake_thresh, target, 7)
+    local rake_target = funcs.get_best_dot_target(lists.DEBUFFS.RAKE, spells.RAKE.id, rake_thresh, target, 10)
     if rake_target then
         if energy < 35 then return true end
         if spells.RAKE:cast(rake_target, "Rake") then return true end
@@ -316,7 +321,7 @@ actionList.finisher = function(target, spell_targets, combo_points, energy)
 
     local has_bs = me:has_buff(lists.BUFFS.BERSERK) or me:has_buff(lists.BUFFS.INCARNATION)
     if combo_points >= 4 + (has_bs and 1 or 0) then
-        if energy < 50 and not me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING) then return true end
+        if energy < 25 and not me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING) then return true end
         if spells.FEROCIOUS_BITE:cast(target, "Ferocious Bite") then return true end
     end
     return false
@@ -324,7 +329,7 @@ end
 
 -- APL: utility
 actionList.utility = function()
-    if not menu.AUTO_INTERRUPT:get_state() then return false end
+    if not menu.AUTO_INTERRUPT:get_toggle_state() then return false end
     if not core.spell_book.is_spell_learned(spells.SKULL_BASH.id) or not spells.SKULL_BASH:cooldown_up() then return false end
 
     local target = funcs.get_interrupt_target(13) -- Skull Bash range is 13 yards
@@ -355,7 +360,13 @@ local function on_update()
     if me:is_casting() or me:is_channeling() then return end
 
     funcs.update_party_cache()
+    funcs.update_enemy_cache()
     update_variables()
+
+    local control_panel_utility = require("common/utility/control_panel_helper")
+    control_panel_utility:on_update(menu)
+
+    if funcs.check_mark_of_the_wild() then return end
 
     local spell_targets = funcs.count_enemies_in_range(8)
     local combo_points = me:get_power(4) or 0

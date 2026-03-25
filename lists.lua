@@ -33,4 +33,10 @@ Lists.SPECIAL_DISPELS = {
     -- White-listed dangerous spells that might not show up as standard debuff types
 }
 
+Lists.THREAT_BYPASS_UNITS = {
+    -- Units that should be attacked even if they have no threat
+    [196642] = true, -- hungry_lasher
+    [243208] = true, -- dummy
+}
+
 return Lists

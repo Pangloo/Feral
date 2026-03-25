@@ -37,14 +37,21 @@ end
 local cached_dps_target = nil
 local cached_dps_target_valid = false
 local cached_party = {}
+local cached_enemies = {}
+local last_party_scan = 0
+local last_enemy_scan = 0
 local dispel_queue = {}
 local last_dispel_check = 0
+local last_motw_check = 0
+local motw_cast_time = 0
+local motw_is_missing = false
 
 local ttd_cache = {}
 local last_ttd_clear = 0
 
 function Functions.get_time_to_die(unit)
     if not unit or not unit:is_valid() or unit:is_dead() then return 0 end
+    if unit_helper:is_boss(unit) then return 9999 end
 
     local guid = tostring(unit:get_guid())
     local now = core.time()
@@ -140,7 +147,28 @@ function Functions.validate_unit(unit, range)
 end
 
 function Functions.update_party_cache()
-    cached_party = target_selector:get_targets_heal()
+    local now = core.time()
+    if now - last_party_scan >= 0.2 then
+        last_party_scan = now
+        cached_party = unit_helper:get_ally_list_around(core.object_manager.get_local_player():get_position(), 40, true, true)
+    end
+end
+
+function Functions.update_enemy_cache()
+    local now = core.time()
+    if now - last_enemy_scan >= 0.2 then
+        last_enemy_scan = now
+        cached_enemies = {}
+        local me = core.object_manager.get_local_player()
+        if not me then return end
+        
+        local objects = core.object_manager.get_visible_objects()
+        for _, obj in ipairs(objects) do
+            if obj:is_valid() and obj:is_unit() and not obj:is_dead() and me:can_attack(obj) and (me:get_threat_situation(obj) ~= nil or lists.THREAT_BYPASS_UNITS[obj:get_npc_id()]) then
+                table.insert(cached_enemies, obj)
+            end
+        end
+    end
 end
 
 function Functions.get_cached_party()
@@ -162,6 +190,21 @@ function Functions.validate_enemy(unit, spell_id, facing)
     return true
 end
 
+function Functions.get_enemies_around_me(range)
+    local raw_enemies = {}
+    local me = core.object_manager.get_local_player()
+    if not me then return raw_enemies end
+
+    for _, obj in ipairs(cached_enemies) do
+        if obj:is_valid() and not obj:is_dead() then
+            if obj:distance() <= range then
+                table.insert(raw_enemies, obj)
+            end
+        end
+    end
+    return raw_enemies
+end
+
 function Functions.get_dps_target(range)
     range = range or 5
     local me = core.object_manager.get_local_player()
@@ -171,7 +214,7 @@ function Functions.get_dps_target(range)
         return target
     end
     -- Fallback to nearest
-    local raw_enemies = unit_helper:get_enemy_list_around(me:get_position(), range + 15, false, false)
+    local raw_enemies = Functions.get_enemies_around_me(range)
     local best_enemy = nil
     local min_dist = 999
     for _, enemy in ipairs(raw_enemies) do
@@ -191,8 +234,7 @@ function Functions.get_dps_target(range)
 end
 
 function Functions.count_enemies_in_range(range)
-    local me = core.object_manager.get_local_player()
-    local raw_enemies = unit_helper:get_enemy_list_around(me:get_position(), range + 15, false, false)
+    local raw_enemies = Functions.get_enemies_around_me(range)
     local count = 0
     for _, enemy in ipairs(raw_enemies) do
         local spell_target = spells.THRASH_CAT.id
@@ -204,8 +246,7 @@ function Functions.count_enemies_in_range(range)
 end
 
 function Functions.get_all_enemies_in_range(range, spell_id)
-    local me = core.object_manager.get_local_player()
-    local raw_enemies = unit_helper:get_enemy_list_around(me:get_position(), range + 15, false, false)
+    local raw_enemies = Functions.get_enemies_around_me(range)
     local enemies = {}
     for _, enemy in ipairs(raw_enemies) do
         local target_spell = spell_id or spells.THRASH_CAT.id
@@ -252,8 +293,7 @@ function Functions.get_best_dot_target(debuff_id, spell_id, refresh_time, curren
 end
 
 function Functions.any_missing_rip(range, threshold, min_ttd)
-    local me = core.object_manager.get_local_player()
-    local raw_enemies = unit_helper:get_enemy_list_around(me:get_position(), range + 5, false, false)
+    local raw_enemies = Functions.get_enemies_around_me(range)
     for _, enemy in ipairs(raw_enemies) do
         if Functions.validate_enemy(enemy, nil, false) and enemy:distance() <= range then
             local remains = Functions.get_debuff_remains(enemy, lists.DEBUFFS.RIP)
@@ -266,8 +306,7 @@ function Functions.any_missing_rip(range, threshold, min_ttd)
 end
 
 function Functions.get_interrupt_target(range)
-    local me = core.object_manager.get_local_player()
-    local raw_enemies = unit_helper:get_enemy_list_around(me:get_position(), range + 15, false, false)
+    local raw_enemies = Functions.get_enemies_around_me(range)
     local now = core.game_time()
     for _, enemy in ipairs(raw_enemies) do
         local spell_target = spells.SKULL_BASH.id
@@ -297,7 +336,7 @@ function Functions.get_interrupt_target(range)
 end
 
 function Functions.check_all_dispels(range)
-    if not menu.AUTO_DISPEL or not menu.AUTO_DISPEL:get_state() then
+    if not menu.AUTO_DISPEL or not menu.AUTO_DISPEL:get_toggle_state() then
         return nil, nil, nil
     end
 
@@ -374,6 +413,52 @@ function Functions.check_all_dispels(range)
     end
 
     return ready_ally, ready_buff, ready_type
+end
+
+function Functions.check_mark_of_the_wild()
+    if not spells.MARK_OF_THE_WILD:is_learned() or not spells.MARK_OF_THE_WILD:cooldown_up() then
+        return false
+    end
+
+    local me = core.object_manager.get_local_player()
+    if not me or me:is_mounted() then
+        return false
+    end
+
+    local now = core.time()
+
+    if now - last_motw_check >= 5 then
+        last_motw_check = now
+        local party = Functions.get_cached_party()
+        local missing_buff = false
+
+        if Functions.get_buff_remains(me, 1126) == 0 then
+            missing_buff = true
+        else
+            for _, ally in ipairs(party) do
+                if Functions.validate_unit(ally, 40) then
+                    if Functions.get_buff_remains(ally, 1126) == 0 then
+                        missing_buff = true
+                        break
+                    end
+                end
+            end
+        end
+
+        if missing_buff and not motw_is_missing then
+            motw_is_missing = true
+            motw_cast_time = now + math.random(3, 8)
+        elseif not missing_buff then
+            motw_is_missing = false
+        end
+    end
+
+    if motw_is_missing and now >= motw_cast_time then
+        motw_is_missing = false
+        return spells.MARK_OF_THE_WILD:cast(me, "Mark of the Wild (Missing from party)")
+    end
+
+    return false
 end
 
 return Functions
