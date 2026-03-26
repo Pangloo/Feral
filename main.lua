@@ -242,7 +242,7 @@ actionList.aoe_finisher = function(target, spell_targets, combo_points, energy)
     local rip_thresh = tf_expiring and 10 or 5.0
 
     -- Primal Wrath: Only cast if a target in range has the dot expiring within 5 seconds
-    if core.spell_book.is_spell_learned(spells.PRIMAL_WRATH.id) and combo_points >= 5 and spell_targets > 1 then
+    if core.spell_book.is_spell_learned(spells.PRIMAL_WRATH.id) and combo_points >= 4 and spell_targets > 1 then
         local pw_target = funcs.get_best_dot_target(lists.DEBUFFS.RIP, spells.PRIMAL_WRATH.id, rip_thresh, target, 7)
         if pw_target then
             if energy < 20 then return true end
@@ -261,7 +261,7 @@ actionList.aoe_finisher = function(target, spell_targets, combo_points, energy)
     end
 
     -- Ferocious Bite / Ravage (Prioritized if no dot maintenance was performed)
-    local min_cp = 4 + (talent.primal_wrath and 1 or 0)
+    local min_cp = 4
     if combo_points >= min_cp or me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING) then
         if energy < 25 and not me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING) then return true end
         local reason = me:has_buff(lists.BUFFS.RAVAGE) and "Ferocious Bite (Ravage)" or "Ferocious Bite (AoE)"

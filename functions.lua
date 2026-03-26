@@ -6,6 +6,7 @@ local target_selector = require("common/modules/target_selector")
 local health_pred = require("common/modules/health_prediction")
 local buff_manager = require("common/modules/buff_manager")
 local unit_helper = require("common/utility/unit_helper")
+local spell_helper = require("common/utility/spell_helper")
 
 local Functions = {}
 
@@ -150,7 +151,8 @@ function Functions.update_party_cache()
     local now = core.time()
     if now - last_party_scan >= 0.2 then
         last_party_scan = now
-        cached_party = unit_helper:get_ally_list_around(core.object_manager.get_local_player():get_position(), 40, true, true)
+        cached_party = unit_helper:get_ally_list_around(core.object_manager.get_local_player():get_position(), 40, true,
+            true)
     end
 end
 
@@ -161,7 +163,7 @@ function Functions.update_enemy_cache()
         cached_enemies = {}
         local me = core.object_manager.get_local_player()
         if not me then return end
-        
+
         local objects = core.object_manager.get_visible_objects()
         for _, obj in ipairs(objects) do
             if obj:is_valid() and obj:is_unit() and not obj:is_dead() and me:can_attack(obj) and (me:get_threat_situation(obj) ~= nil or lists.THREAT_BYPASS_UNITS[obj:get_npc_id()]) then
@@ -180,7 +182,6 @@ function Functions.validate_enemy(unit, spell_id, facing)
 
     local me = core.object_manager.get_local_player()
     if spell_id then
-        local spell_helper = require("common/utility/spell_helper")
         if not spell_helper:is_spell_in_range(spell_id, unit, me:get_position(), unit:get_position()) then
             return false
         end
@@ -193,11 +194,13 @@ end
 function Functions.get_enemies_around_me(range)
     local raw_enemies = {}
     local me = core.object_manager.get_local_player()
+    local checkspell = spells.SHRED.id
     if not me then return raw_enemies end
+    if range == 8 then checkspell = spells.THRASH_CAT.id end
 
     for _, obj in ipairs(cached_enemies) do
         if obj:is_valid() and not obj:is_dead() then
-            if obj:distance() <= range then
+            if spell_helper:is_spell_in_range(checkspell, obj, me:get_position(), obj:get_position()) then
                 table.insert(raw_enemies, obj)
             end
         end
