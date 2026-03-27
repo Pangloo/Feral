@@ -5,7 +5,7 @@ local menu = require("menu")
 
 local UI = {}
 
-local window_size = vec2.new(275, 80) -- Tightened fit for 4 buttons
+local window_size = vec2.new(340, 80) -- Tightened fit for 5 buttons
 local button_size = vec2.new(60, 60)
 local spacing = 5
 local padding = 10
@@ -21,7 +21,7 @@ local color_border = color.new(255, 255, 255, 50)    -- Border
 
 function UI.draw()
     if not win then
-        win = core.menu.window(" Feral Hotbar V4")
+        win = core.menu.window(" Feral Hotbar V5")
         win:set_initial_size(window_size)
         win:set_initial_position(vec2.new(500, 500))
     end
@@ -71,6 +71,7 @@ function UI.draw()
 
             draw_btn("Rotation", menu.ENABLE_ROTATION, "Enable and disable rotation")
             draw_btn("CDs", menu.USE_COOLDOWNS, "Toggle Use Cooldowns")
+            draw_btn("Mini CDs", menu.USE_MINI_CDS, "Toggle Use Mini Cooldowns")
             draw_btn("Kick", menu.AUTO_INTERRUPT, "Toggle Auto Interrupt")
             draw_btn("Dispel", menu.AUTO_DISPEL, "Toggle Auto Dispel")
 

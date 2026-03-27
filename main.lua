@@ -8,6 +8,8 @@ local lists = require("lists")
 local funcs = require("functions")
 local menu = require("menu")
 local ui = require("ui")
+local spell_queue = require("common/modules/spell_queue")
+local spell_helper = require("common/utility/spell_helper")
 
 local me = core.object_manager.get_local_player()
 if not me then return end
@@ -132,12 +134,19 @@ actionList.cooldown = function(target, spell_targets)
 
     local has_tf = me:has_buff(lists.BUFFS.TIGERS_FURY)
 
+
+
     -- incarnation / berserk
     if has_tf and not variable.holdBerserk then
         if core.spell_book.is_spell_learned(spells.INCARNATION.id) and spells.INCARNATION:cooldown_up() then
             if spells.INCARNATION:cast(me, "Incarnation") then return true end
         elseif core.spell_book.is_spell_learned(spells.BERSERK.id) and spells.BERSERK:cooldown_up() then
-            if spells.BERSERK:cast(me, "Berserk") then return true end
+            if core.spell_book.is_item_usable(193701) and me:get_item_cooldown(193701) <= 2 then
+                if spell_queue:queue_item_self(193701, 1, "Puzzle box") then return true end
+            end
+            if not core.spell_book.is_item_usable(193701) or me:has_buff(383781) then
+                if spells.BERSERK:cast(me, "Berserk") then return true end
+            end
         end
     end
 
@@ -148,7 +157,7 @@ actionList.cooldown = function(target, spell_targets)
     local frenzy_tf_only = menu.FRENZY_TF_ONLY:get_state()
     local can_cast_frenzy = not frenzy_tf_only or has_tf
 
-    if can_cast_frenzy and funcs.get_group_time_to_die(8) >= 12 then
+    if menu.USE_MINI_CDS:get_toggle_state() and can_cast_frenzy and funcs.get_group_time_to_die(8) >= 15 then
         if talent.frantic_frenzy then
             if core.spell_book.is_spell_learned(spells.FRANTIC_FRENZY.id) and spells.FRANTIC_FRENZY:cooldown_up() then
                 if spells.FRANTIC_FRENZY:cast(target, "Frantic Frenzy") then return true end
@@ -180,7 +189,7 @@ actionList.aoe_builder = function(target, spell_targets, combo_points, energy)
 
     -- Rake conditions simplified (Scan and Spread) - Only if targets < 4
     if spell_targets <= variable.dotc_rake_threshold then
-        local rake_target = funcs.get_best_dot_target(lists.DEBUFFS.RAKE, spells.RAKE.id, rake_thresh, target, 7)
+        local rake_target = funcs.get_best_dot_target(lists.DEBUFFS.RAKE, spells.RAKE.id, rake_thresh, target, 9)
         if rake_target then
             if energy < 35 then return true end
             if spells.RAKE:cast(rake_target, "Rake (refresh/spread)") then return true end
@@ -199,7 +208,7 @@ actionList.aoe_builder = function(target, spell_targets, combo_points, energy)
 
     -- Moonfire (Lunar Inspiration) - Only prioritized dynamically on lower target counts
     if talent.lunar_inspiration and spell_targets <= 3 then
-        local moonfire_target = funcs.get_best_dot_target(lists.DEBUFFS.MOONFIRE, spells.MOONFIRE_CAT.id, 4.2, target, 7)
+        local moonfire_target = funcs.get_best_dot_target(lists.DEBUFFS.MOONFIRE, spells.MOONFIRE_CAT.id, 4.2, target, 9)
         if moonfire_target then
             if energy < 30 then return true end
             if spells.MOONFIRE_CAT:cast(moonfire_target, "Moonfire (AoE)") then return true end
@@ -239,7 +248,7 @@ actionList.aoe_finisher = function(target, spell_targets, combo_points, energy)
     local has_bs = me:has_buff(lists.BUFFS.BERSERK) or me:has_buff(lists.BUFFS.INCARNATION)
     local tf_remains = funcs.get_buff_remains(me, lists.BUFFS.TIGERS_FURY)
     local tf_expiring = tf_remains > 0 and tf_remains < 3
-    local rip_thresh = tf_expiring and 10 or 5.0
+    local rip_thresh = tf_expiring and 7 or 4
 
     -- Primal Wrath: Only cast if a target in range has the dot expiring within 5 seconds
     if core.spell_book.is_spell_learned(spells.PRIMAL_WRATH.id) and combo_points >= 4 and spell_targets > 1 then
@@ -285,7 +294,7 @@ actionList.builder = function(target, spell_targets, combo_points, energy)
     end
 
     -- Ensure basic Rake uptime securely and spread if able
-    local rake_target = funcs.get_best_dot_target(lists.DEBUFFS.RAKE, spells.RAKE.id, rake_thresh, target, 10)
+    local rake_target = funcs.get_best_dot_target(lists.DEBUFFS.RAKE, spells.RAKE.id, rake_thresh, target, 9)
     if rake_target then
         if energy < 35 then return true end
         if spells.RAKE:cast(rake_target, "Rake") then return true end
@@ -430,7 +439,7 @@ local function on_update()
         return false
     end
 
-    if spells.TIGERS_FURY:cooldown_up() and frenzy_tf_check() and funcs.get_group_time_to_die(8) >= 15 then
+    if menu.USE_MINI_CDS:get_toggle_state() and spells.TIGERS_FURY:cooldown_up() and frenzy_tf_check() and funcs.get_group_time_to_die(8) >= 15 then
         --core.log("Frantic frenzy cd remains: " .. tostring(core.spell_book.get_spell_cooldown(spells.FRANTIC_FRENZY.id)))
         --core.log("Feral frenzy cd remains: " .. tostring(core.spell_book.get_spell_cooldown(spells.FERAL_FRENZY.id)))
         if spells.TIGERS_FURY:cast(me, "Tiger's Fury") then return end

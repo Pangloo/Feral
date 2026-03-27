@@ -298,7 +298,7 @@ end
 function Functions.any_missing_rip(range, threshold, min_ttd)
     local raw_enemies = Functions.get_enemies_around_me(range)
     for _, enemy in ipairs(raw_enemies) do
-        if Functions.validate_enemy(enemy, nil, false) and enemy:distance() <= range then
+        if Functions.validate_enemy(enemy, spells.THRASH_CAT.id, false) then
             local remains = Functions.get_debuff_remains(enemy, lists.DEBUFFS.RIP)
             if remains < (threshold or 5) and Functions.get_time_to_die(enemy) >= (min_ttd or 7) then
                 return true
@@ -308,9 +308,19 @@ function Functions.any_missing_rip(range, threshold, min_ttd)
     return false
 end
 
+local interrupt_cache = {}
+local last_interrupt_clear = 0
+
 function Functions.get_interrupt_target(range)
     local raw_enemies = Functions.get_enemies_around_me(range)
     local now = core.game_time()
+    local real_now = core.time()
+
+    if real_now - last_interrupt_clear > 15000 then
+        interrupt_cache = {}
+        last_interrupt_clear = real_now
+    end
+
     for _, enemy in ipairs(raw_enemies) do
         local spell_target = spells.SKULL_BASH.id
         if Functions.validate_enemy(enemy, spell_target, false) then
@@ -318,8 +328,14 @@ function Functions.get_interrupt_target(range)
                 local start_time = enemy:get_active_spell_cast_start_time()
                 local end_time = enemy:get_active_spell_cast_end_time()
                 if start_time and end_time and end_time > start_time then
+                    local identifier = tostring(enemy:get_guid()) .. "_" .. tostring(start_time)
+                    if not interrupt_cache[identifier] then
+                        interrupt_cache[identifier] = math.random(30, 75)
+                    end
+                    local delay = interrupt_cache[identifier]
+
                     local pct = ((now - start_time) / (end_time - start_time)) * 100
-                    if pct >= 30 and pct <= 75 then
+                    if pct >= delay then
                         return enemy
                     end
                 end
@@ -327,8 +343,14 @@ function Functions.get_interrupt_target(range)
                 local start_time = enemy:get_active_channel_cast_start_time()
                 local end_time = enemy:get_active_channel_cast_end_time()
                 if start_time and end_time and end_time > start_time then
+                    local identifier = tostring(enemy:get_guid()) .. "_channel_" .. tostring(start_time)
+                    if not interrupt_cache[identifier] then
+                        interrupt_cache[identifier] = math.random(15, 45)
+                    end
+                    local delay = interrupt_cache[identifier]
+
                     local pct = ((now - start_time) / (end_time - start_time)) * 100
-                    if pct >= 10 and pct <= 35 then
+                    if pct >= delay then
                         return enemy
                     end
                 end
@@ -356,7 +378,13 @@ function Functions.check_all_dispels(range)
 
     local me = core.object_manager.get_local_player()
     range = range or 40
-    local allies = cached_party
+    local allies = {}
+    table.insert(allies, me)
+    for _, ally in ipairs(cached_party) do
+        if not ally:is_unit(me) then
+            table.insert(allies, ally)
+        end
+    end
 
     local current_active = {}
     local ready_ally, ready_buff, ready_type = nil, nil, nil

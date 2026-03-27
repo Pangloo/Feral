@@ -12,6 +12,7 @@ Menu.SHOW_UI = core.menu.checkbox(true, ID .. "show_ui")
 Menu.ENABLE_ROTATION = core.menu.keybind(999, true, ID .. "rot_enabled")
 
 Menu.USE_COOLDOWNS = core.menu.keybind(999, true, ID .. "use_cds")
+Menu.USE_MINI_CDS = core.menu.keybind(999, true, ID .. "use_mini_cds")
 Menu.AUTO_INTERRUPT = core.menu.keybind(999, true, ID .. "auto_interrupt")
 Menu.AUTO_DISPEL = core.menu.keybind(999, true, ID .. "auto_dispel")
 
@@ -26,6 +27,7 @@ function Menu.draw()
             Menu.SHOW_UI:render("Show UI Hotbar")
             Menu.ENABLE_ROTATION:render("Enable Rotation")
             Menu.USE_COOLDOWNS:render("Use Cooldowns")
+            Menu.USE_MINI_CDS:render("Use Mini Cooldowns")
             Menu.AUTO_INTERRUPT:render("Auto Interrupt")
             Menu.AUTO_DISPEL:render("Auto Dispel")
         end)
@@ -49,6 +51,7 @@ core.register_on_render_control_panel_callback(function()
     local cp_table = {}
     control_panel_utility:insert_toggle_(cp_table, "Rotation", Menu.ENABLE_ROTATION, false)
     control_panel_utility:insert_toggle_(cp_table, "CDs", Menu.USE_COOLDOWNS, false)
+    control_panel_utility:insert_toggle_(cp_table, "Mini CDs", Menu.USE_MINI_CDS, false)
     control_panel_utility:insert_toggle_(cp_table, "Kick", Menu.AUTO_INTERRUPT, false)
     control_panel_utility:insert_toggle_(cp_table, "Dispel", Menu.AUTO_DISPEL, false)
     return cp_table
