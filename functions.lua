@@ -167,7 +167,20 @@ function Functions.update_enemy_cache()
         local objects = core.object_manager.get_visible_objects()
         for _, obj in ipairs(objects) do
             if obj:is_valid() and obj:is_unit() and not obj:is_dead() and me:can_attack(obj) and (me:get_threat_situation(obj) ~= nil or lists.THREAT_BYPASS_UNITS[obj:get_npc_id()]) then
-                table.insert(cached_enemies, obj)
+                local is_blacklisted = false
+                local npc_id = obj:get_npc_id()
+                if lists.ENEMY_BLACKLIST_WITH_BUFFS and lists.ENEMY_BLACKLIST_WITH_BUFFS[npc_id] then
+                    for _, buff_id in ipairs(lists.ENEMY_BLACKLIST_WITH_BUFFS[npc_id]) do
+                        if Functions.get_buff_remains(obj, buff_id) > 0 then
+                            is_blacklisted = true
+                            break
+                        end
+                    end
+                end
+
+                if not is_blacklisted then
+                    table.insert(cached_enemies, obj)
+                end
             end
         end
     end
@@ -179,6 +192,15 @@ end
 
 function Functions.validate_enemy(unit, spell_id, facing)
     if not unit or not unit:is_valid() or unit:is_dead() or unit:is_player() then return false end
+
+    local npc_id = unit:get_npc_id()
+    if lists.ENEMY_BLACKLIST_WITH_BUFFS and lists.ENEMY_BLACKLIST_WITH_BUFFS[npc_id] then
+        for _, buff_id in ipairs(lists.ENEMY_BLACKLIST_WITH_BUFFS[npc_id]) do
+            if Functions.get_buff_remains(unit, buff_id) > 0 then
+                return false
+            end
+        end
+    end
 
     local me = core.object_manager.get_local_player()
     if spell_id then

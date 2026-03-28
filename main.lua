@@ -126,6 +126,20 @@ actionList.cd_variable = function()
     variable.holdConvoke = not cds_enabled
 end
 
+local function frenzy_tf_check()
+    if talent.frantic_frenzy then
+        if core.spell_book.get_spell_cooldown(spells.FRANTIC_FRENZY.id) < 12 or core.spell_book.get_spell_cooldown(spells.FRANTIC_FRENZY.id) > 19 then
+            return true
+        end
+    else
+        if core.spell_book.get_spell_cooldown(spells.FERAL_FRENZY.id) < 12 or core.spell_book.get_spell_cooldown(spells.FERAL_FRENZY.id) > 19 then
+            return true
+        end
+    end
+    if not menu.FRENZY_TF_ONLY:get_state() then return true end
+    return false
+end
+
 
 
 -- APL: cooldown
@@ -134,16 +148,11 @@ actionList.cooldown = function(target, spell_targets)
 
     local has_tf = me:has_buff(lists.BUFFS.TIGERS_FURY)
 
-
-
     -- incarnation / berserk
     if has_tf and not variable.holdBerserk then
         if core.spell_book.is_spell_learned(spells.INCARNATION.id) and spells.INCARNATION:cooldown_up() then
             if spells.INCARNATION:cast(me, "Incarnation") then return true end
         elseif core.spell_book.is_spell_learned(spells.BERSERK.id) and spells.BERSERK:cooldown_up() then
-            if core.spell_book.is_item_usable(193701) and me:get_item_cooldown(193701) <= 2 then
-                if spell_queue:queue_item_self(193701, 1, "Puzzle box") then return true end
-            end
             if not core.spell_book.is_item_usable(193701) or me:has_buff(383781) then
                 if spells.BERSERK:cast(me, "Berserk") then return true end
             end
@@ -424,19 +433,10 @@ local function on_update()
 
     if actionList.utility() then return end
 
-    local tf_dur = 15 -- aprox duration
-    local function frenzy_tf_check()
-        if talent.frantic_frenzy then
-            if core.spell_book.get_spell_cooldown(spells.FRANTIC_FRENZY.id) < 12 or core.spell_book.get_spell_cooldown(spells.FRANTIC_FRENZY.id) > 19 then
-                return true
-            end
-        else
-            if core.spell_book.get_spell_cooldown(spells.FERAL_FRENZY.id) < 12 or core.spell_book.get_spell_cooldown(spells.FERAL_FRENZY.id) > 19 then
-                return true
-            end
+    if not variable.holdBerserk and spells.TIGERS_FURY:cooldown_up() and frenzy_tf_check() then
+        if core.spell_book.is_item_usable(193701) and me:get_item_cooldown(193701) <= 2 and not me:is_moving() then
+            if spell_queue:queue_item_self(193701, 1, "Puzzle box") then return true end
         end
-        if not menu.FRENZY_TF_ONLY:get_state() then return true end
-        return false
     end
 
     if menu.USE_MINI_CDS:get_toggle_state() and spells.TIGERS_FURY:cooldown_up() and frenzy_tf_check() and funcs.get_group_time_to_die(8) >= 15 then

@@ -39,4 +39,10 @@ Lists.THREAT_BYPASS_UNITS = {
     [243208] = true, -- dummy
 }
 
+
+Lists.ENEMY_BLACKLIST_WITH_BUFFS = {
+    [252918] = { 1249714 }, -- abyssal-voidshaper with umbral barrier
+    [240435] = { 1253918 }, -- imperators glory
+}
+
 return Lists
