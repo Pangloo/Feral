@@ -153,7 +153,7 @@ actionList.cooldown = function(target, spell_targets)
         if core.spell_book.is_spell_learned(spells.INCARNATION.id) and spells.INCARNATION:cooldown_up() then
             if spells.INCARNATION:cast(me, "Incarnation") then return true end
         elseif core.spell_book.is_spell_learned(spells.BERSERK.id) and spells.BERSERK:cooldown_up() then
-            if not core.spell_book.is_item_usable(193701) or me:has_buff(383781) then
+            if not menu.USE_PUZZLE_BOX:get_state() or not core.spell_book.is_item_usable(193701) or me:has_buff(383781) then
                 if spells.BERSERK:cast(me, "Berserk") then return true end
             end
         end
@@ -432,14 +432,20 @@ local function on_update()
     -- APL Main Loop
 
     if actionList.utility() then return end
-
-    if not variable.holdBerserk and spells.TIGERS_FURY:cooldown_up() and frenzy_tf_check() then
-        if core.spell_book.is_item_usable(193701) and me:get_item_cooldown(193701) <= 2 and not me:is_moving() then
-            if spell_queue:queue_item_self(193701, 1, "Puzzle box") then return true end
+    local function shouldbox()
+        if not menu.USE_PUZZLE_BOX:get_state() then return false end
+        if not variable.holdBerserk and spells.TIGERS_FURY:cooldown_up() and frenzy_tf_check() and menu.USE_MINI_CDS:get_toggle_state() then
+            if core.spell_book.is_item_usable(193701) and me:get_item_cooldown(193701) <= 2 then
+                return true
+            end
         end
+        return false
+    end
+    if shouldbox() and not me:is_moving() then
+        if spell_queue:queue_item_self(193701, 1, "Puzzle box") then return true end
     end
 
-    if menu.USE_MINI_CDS:get_toggle_state() and spells.TIGERS_FURY:cooldown_up() and frenzy_tf_check() and funcs.get_group_time_to_die(8) >= 15 then
+    if not shouldbox() and menu.USE_MINI_CDS:get_toggle_state() and spells.TIGERS_FURY:cooldown_up() and frenzy_tf_check() and funcs.get_group_time_to_die(8) >= 15 then
         --core.log("Frantic frenzy cd remains: " .. tostring(core.spell_book.get_spell_cooldown(spells.FRANTIC_FRENZY.id)))
         --core.log("Feral frenzy cd remains: " .. tostring(core.spell_book.get_spell_cooldown(spells.FERAL_FRENZY.id)))
         if spells.TIGERS_FURY:cast(me, "Tiger's Fury") then return end
