@@ -1,7 +1,7 @@
 local plugin = {}
 
 plugin.name = "Feral"
-plugin.version = "1.0.0"
+plugin.version = "1.0.9"
 plugin.author = "Panglo"
 plugin.load = true
 

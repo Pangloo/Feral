@@ -35,6 +35,24 @@ function Functions.get_buff_remains(unit, buff_id)
     return 0
 end
 
+function Functions.has_debuff(unit, debuff_id)
+    if not unit or not unit:is_valid() then return false end
+    if type(debuff_id) == "number" then
+        debuff_id = { debuff_id }
+    end
+    local debuff_info = buff_manager:get_debuff_data(unit, debuff_id)
+    return debuff_info and debuff_info.is_active == true
+end
+
+function Functions.has_buff(unit, buff_id)
+    if not unit or not unit:is_valid() then return false end
+    if type(buff_id) == "number" then
+        buff_id = { buff_id }
+    end
+    local buff_info = buff_manager:get_buff_data(unit, buff_id)
+    return buff_info and buff_info.is_active == true
+end
+
 local cached_dps_target = nil
 local cached_dps_target_valid = false
 local cached_party = {}
@@ -156,6 +174,18 @@ function Functions.update_party_cache()
     end
 end
 
+local function Chimaeruscheck(obj)
+    local me = core.object_manager.get_local_player()
+    if not me then return false end
+    local has_phase_buff = Functions.has_buff(obj, 1245727)
+    local has_phase_debuff = Functions.has_debuff(me, 1245698)
+
+    if has_phase_debuff then return has_phase_buff end
+    if has_phase_buff then return false end
+
+    return true
+end
+
 function Functions.update_enemy_cache()
     local now = core.time()
     if now - last_enemy_scan >= 0.2 then
@@ -178,7 +208,7 @@ function Functions.update_enemy_cache()
                     end
                 end
 
-                if not is_blacklisted then
+                if not is_blacklisted and Chimaeruscheck(obj) then
                     table.insert(cached_enemies, obj)
                 end
             end
@@ -200,6 +230,10 @@ function Functions.validate_enemy(unit, spell_id, facing)
                 return false
             end
         end
+    end
+
+    if not Chimaeruscheck(unit) then
+        return false
     end
 
     local me = core.object_manager.get_local_player()
