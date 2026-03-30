@@ -196,7 +196,7 @@ function Functions.update_enemy_cache()
 
         local objects = core.object_manager.get_visible_objects()
         for _, obj in ipairs(objects) do
-            if obj:is_valid() and obj:is_unit() and not obj:is_dead() and me:can_attack(obj) and (me:get_threat_situation(obj) ~= nil or lists.THREAT_BYPASS_UNITS[obj:get_npc_id()]) then
+            if obj:is_valid() and obj:is_unit() and not obj:is_dead() and me:can_attack(obj) and ((me:get_threat_situation(obj) ~= nil and unit:is_in_combat()) or lists.THREAT_BYPASS_UNITS[obj:get_npc_id()]) then
                 local is_blacklisted = false
                 local npc_id = obj:get_npc_id()
                 if lists.ENEMY_BLACKLIST_WITH_BUFFS and lists.ENEMY_BLACKLIST_WITH_BUFFS[npc_id] then
@@ -221,7 +221,8 @@ function Functions.get_cached_party()
 end
 
 function Functions.validate_enemy(unit, spell_id, facing)
-    if not unit or not unit:is_valid() or unit:is_dead() or unit:is_player() then return false end
+    local me = core.object_manager.get_local_player()
+    if not (unit:is_valid() and unit:is_unit() and not unit:is_dead() and me:can_attack(unit) and ((me:get_threat_situation(unit) ~= nil and unit:is_in_combat()) or lists.THREAT_BYPASS_UNITS[unit:get_npc_id()])) then return false end
 
     local npc_id = unit:get_npc_id()
     if lists.ENEMY_BLACKLIST_WITH_BUFFS and lists.ENEMY_BLACKLIST_WITH_BUFFS[npc_id] then
