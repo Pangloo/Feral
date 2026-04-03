@@ -152,6 +152,12 @@ function Functions.get_group_time_to_die(range)
     return max_ttd
 end
 
+local function Chimaeruscheck(obj)
+    local me = core.object_manager.get_local_player()
+    if not me then return false end
+    return me:get_unit_phase() == obj:get_unit_phase()
+end
+
 function Functions.validate_unit(unit, range)
     if not unit or not unit:is_valid() or unit:is_dead() or not (unit:is_party_member() or unit:is_unit(core.object_manager.get_local_player())) then return false end
     if not Chimaeruscheck(unit) then return false end
@@ -173,12 +179,6 @@ function Functions.update_party_cache()
         cached_party = unit_helper:get_ally_list_around(core.object_manager.get_local_player():get_position(), 40, true,
             true)
     end
-end
-
-local function Chimaeruscheck(obj)
-    local me = core.object_manager.get_local_player()
-    if not me then return false end
-    return me:get_unit_phase() == obj:get_unit_phase()
 end
 
 function Functions.update_enemy_cache()
