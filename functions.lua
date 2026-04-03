@@ -70,7 +70,7 @@ local last_ttd_clear = 0
 
 function Functions.get_time_to_die(unit)
     if not unit or not unit:is_valid() or unit:is_dead() then return 0 end
-    if unit_helper:is_boss(unit) then return 9999 end
+    if unit:is_boss() then return 9999 end
 
     local guid = tostring(unit:get_guid())
     local now = core.time()
@@ -154,6 +154,7 @@ end
 
 function Functions.validate_unit(unit, range)
     if not unit or not unit:is_valid() or unit:is_dead() or not (unit:is_party_member() or unit:is_unit(core.object_manager.get_local_player())) then return false end
+    if not Chimaeruscheck(unit) then return false end
     if range then
         local me = core.object_manager.get_local_player()
         local dist = unit:distance()
@@ -177,13 +178,7 @@ end
 local function Chimaeruscheck(obj)
     local me = core.object_manager.get_local_player()
     if not me then return false end
-    local has_phase_buff = Functions.has_buff(obj, 1245727)
-    local has_phase_debuff = Functions.has_debuff(me, 1245698)
-
-    if has_phase_debuff then return has_phase_buff end
-    if has_phase_buff then return false end
-
-    return true
+    return me:get_unit_phase() == obj:get_unit_phase()
 end
 
 function Functions.update_enemy_cache()
@@ -196,7 +191,7 @@ function Functions.update_enemy_cache()
 
         local objects = core.object_manager.get_visible_objects()
         for _, obj in ipairs(objects) do
-            if obj:is_valid() and obj:is_unit() and not obj:is_dead() and me:can_attack(obj) and ((me:get_threat_situation(obj) ~= nil and unit:is_in_combat()) or lists.THREAT_BYPASS_UNITS[obj:get_npc_id()]) then
+            if obj:is_valid() and obj:is_unit() and not obj:is_dead() and me:can_attack(obj) and ((me:get_threat_situation(obj) ~= nil and obj:is_in_combat()) or lists.THREAT_BYPASS_UNITS[obj:get_npc_id()]) then
                 local is_blacklisted = false
                 local npc_id = obj:get_npc_id()
                 if lists.ENEMY_BLACKLIST_WITH_BUFFS and lists.ENEMY_BLACKLIST_WITH_BUFFS[npc_id] then

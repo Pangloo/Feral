@@ -5,7 +5,7 @@ local function create_spell(id)
     return {
         id = id,
         is_learned = function(self)
-            return core.spell_book.has_spell(self.id)
+            return core.spell_book.is_spell_learned(self.id)
         end,
         cooldown_up = function(self)
             return not spell_helper:is_spell_on_cooldown(self.id)
