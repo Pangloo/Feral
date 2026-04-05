@@ -1,5 +1,4 @@
 -- main.lua
-local enums = require("common/enums")
 local plugin = require("header")
 if not plugin.load then return end
 
@@ -10,6 +9,7 @@ local menu = require("menu")
 local ui = require("ui")
 local spell_queue = require("common/modules/spell_queue")
 local spell_helper = require("common/utility/spell_helper")
+local control_panel_utility = require("common/utility/control_panel_helper")
 
 local me = core.object_manager.get_local_player()
 if not me then return end
@@ -66,20 +66,9 @@ local hero_tree = {
     druid_of_the_claw = false,
 }
 
-local function update_variables()
-    time = core.time() / 1000 -- simple approximation of combat time mostly handled in variables
+local last_talent_check = 0
 
-    if not me:affecting_combat() then
-        variable.combat_start_time = 0
-    elseif variable.combat_start_time == 0 then
-        variable.combat_start_time = time
-    end
-
-    local combat_time = variable.combat_start_time > 0 and (time - variable.combat_start_time) or 0
-
-    variable.regrowth = menu.REGROWTH:get_state()
-
-    -- Update Talents
+local function update_talents()
     talent.wild_slashes = core.spell_book.is_spell_learned(spells.WILD_SLASHES.id)
     talent.infected_wounds = core.spell_book.is_spell_learned(spells.INFECTED_WOUNDS.id)
     talent.berserk_heart_of_the_lion = core.spell_book.is_spell_learned(spells.BERSERK_HEART_OF_THE_LION.id)
@@ -105,6 +94,25 @@ local function update_variables()
     if talent.doubleclawed_rake or talent.thriving_growth then
         variable.dotc_rake_threshold = 50
     end
+end
+
+local function update_variables()
+    time = core.time() / 1000 -- simple approximation of combat time mostly handled in variables
+
+    if not me:affecting_combat() then
+        variable.combat_start_time = 0
+    elseif variable.combat_start_time == 0 then
+        variable.combat_start_time = time
+    end
+
+    variable.regrowth = menu.REGROWTH:get_state()
+
+    -- Update Talents every 2 seconds
+    local now = core.time()
+    if now - last_talent_check >= 2 then
+        last_talent_check = now
+        update_talents()
+    end
 
     variable.tfRemains = core.spell_book.get_spell_cooldown(spells.TIGERS_FURY.id)
 end
@@ -127,14 +135,10 @@ actionList.cd_variable = function()
 end
 
 local function frenzy_tf_check()
-    if talent.frantic_frenzy then
-        if core.spell_book.get_spell_cooldown(spells.FRANTIC_FRENZY.id) < 12 or core.spell_book.get_spell_cooldown(spells.FRANTIC_FRENZY.id) > 19 then
-            return true
-        end
-    else
-        if core.spell_book.get_spell_cooldown(spells.FERAL_FRENZY.id) < 12 or core.spell_book.get_spell_cooldown(spells.FERAL_FRENZY.id) > 19 then
-            return true
-        end
+    local frenzy_spell = talent.frantic_frenzy and spells.FRANTIC_FRENZY or spells.FERAL_FRENZY
+    local cd = core.spell_book.get_spell_cooldown(frenzy_spell.id)
+    if cd < 12 or cd > 19 then
+        return true
     end
     if not menu.FRENZY_TF_ONLY:get_state() then return true end
     return false
@@ -195,6 +199,16 @@ actionList.aoe_builder = function(target, spell_targets, combo_points, energy)
     local tf_expiring = tf_remains > 0 and tf_remains < 3
     local rake_thresh = tf_expiring and 8 or 3.6
     local thrash_thresh = tf_expiring and 8 or 3.6
+    local has_cc = me:has_buff(lists.BUFFS.CLEARCASTING)
+
+    -- Clearcasting: spend on Swipe/Brutal Slash in AoE (free ability)
+    if has_cc then
+        if core.spell_book.is_spell_learned(spells.BRUTAL_SLASH.id) and spells.BRUTAL_SLASH:cooldown_up() then
+            if spells.BRUTAL_SLASH:cast(me, "Brutal Slash (Clearcasting)") then return true end
+        elseif core.spell_book.is_spell_learned(spells.SWIPE_CAT.id) and spells.SWIPE_CAT:cooldown_up() then
+            if spells.SWIPE_CAT:cast(me, "Swipe (Clearcasting)") then return true end
+        end
+    end
 
     -- Rake conditions simplified (Scan and Spread) - Only if targets < 4
     if spell_targets <= variable.dotc_rake_threshold then
@@ -254,10 +268,7 @@ end
 
 -- APL: aoe_finisher
 actionList.aoe_finisher = function(target, spell_targets, combo_points, energy)
-    local has_bs = me:has_buff(lists.BUFFS.BERSERK) or me:has_buff(lists.BUFFS.INCARNATION)
-    local tf_remains = funcs.get_buff_remains(me, lists.BUFFS.TIGERS_FURY)
-    local tf_expiring = tf_remains > 0 and tf_remains < 3
-    local rip_thresh = tf_expiring and 8 or 6.5
+    local rip_thresh = 5
 
     -- Primal Wrath: Only cast if a target in range has the dot expiring within 5 seconds
     if core.spell_book.is_spell_learned(spells.PRIMAL_WRATH.id) and combo_points >= 5 and spell_targets > 1 then
@@ -270,7 +281,7 @@ actionList.aoe_finisher = function(target, spell_targets, combo_points, energy)
 
     -- Manual Rip Spread (Only if Primal Wrath is not learned)
     if not talent.primal_wrath and combo_points >= 5 then
-        local rip_spread_thresh = tf_expiring and 10 or 7
+        local rip_spread_thresh = 7
         local rip_target = funcs.get_best_dot_target(lists.DEBUFFS.RIP, spells.RIP.id, rip_spread_thresh, target, 7)
         if rip_target then
             if energy < 30 then return true end
@@ -279,9 +290,11 @@ actionList.aoe_finisher = function(target, spell_targets, combo_points, energy)
     end
 
     -- Ferocious Bite / Ravage (Prioritized if no dot maintenance was performed)
-    local min_cp = 5
-    if combo_points >= min_cp or me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING) then
-        if energy < 25 and not me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING) then return true end
+    local has_bs = me:has_buff(lists.BUFFS.BERSERK) or me:has_buff(lists.BUFFS.INCARNATION)
+    local bite_cost = has_bs and 25 or 50
+    local min_cp = 4 + (has_bs and 1 or 0)
+    if (combo_points >= min_cp or me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING)) and not funcs.any_missing_rip(8, 5, 7) then
+        if energy < bite_cost and not me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING) then return true end
         local reason = me:has_buff(lists.BUFFS.RAVAGE) and "Ferocious Bite (Ravage)" or "Ferocious Bite (AoE)"
         if spells.FEROCIOUS_BITE:cast(target, reason) then return true end
     end
@@ -300,6 +313,12 @@ actionList.builder = function(target, spell_targets, combo_points, energy)
         if core.spell_book.is_spell_learned(spells.SHADOWMELD.id) and spells.SHADOWMELD:cooldown_up() then
             if spells.SHADOWMELD:cast(me, "Shadowmeld") then return true end
         end
+    end
+
+    -- Clearcasting: spend on Shred in ST (free ability)
+    local has_cc = me:has_buff(lists.BUFFS.CLEARCASTING)
+    if has_cc then
+        if spells.SHRED:cast(target, "Shred (Clearcasting)") then return true end
     end
 
     -- Ensure basic Rake uptime securely and spread if able
@@ -324,12 +343,10 @@ actionList.builder = function(target, spell_targets, combo_points, energy)
 end
 
 -- APL: finisher
-actionList.finisher = function(target, spell_targets, combo_points, energy)
-    local tf_remains = funcs.get_buff_remains(me, lists.BUFFS.TIGERS_FURY)
-    local tf_expiring = tf_remains > 0 and tf_remains < 3
-    local rip_thresh = tf_expiring and 10 or 7
+actionList.finisher = function(target, spell_targets, combo_points, energy, has_bs)
+    local rip_thresh = 7
 
-    if combo_points >= 4 then
+    if combo_points >= 5 then
         local rip_target = funcs.get_best_dot_target(lists.DEBUFFS.RIP, spells.RIP.id, rip_thresh, target, 7)
         if rip_target then
             if energy < 30 then return true end
@@ -337,9 +354,9 @@ actionList.finisher = function(target, spell_targets, combo_points, energy)
         end
     end
 
-    local has_bs = me:has_buff(lists.BUFFS.BERSERK) or me:has_buff(lists.BUFFS.INCARNATION)
-    if combo_points >= 4 + (has_bs and 1 or 0) then
-        if energy < 25 and not me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING) then return true end
+    local bite_cost = has_bs and 25 or 50
+    if combo_points >= 4 + (has_bs and 1 or 0) and not funcs.any_missing_rip(8, 5, 7) then
+        if energy < bite_cost and not me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING) then return true end
         if spells.FEROCIOUS_BITE:cast(target, "Ferocious Bite") then return true end
     end
     return false
@@ -347,21 +364,38 @@ end
 
 -- APL: utility
 actionList.utility = function()
-    if not menu.AUTO_INTERRUPT:get_toggle_state() then return false end
-    if not core.spell_book.is_spell_learned(spells.SKULL_BASH.id) or not spells.SKULL_BASH:cooldown_up() then return false end
-
-    local target = funcs.get_interrupt_target(13) -- Skull Bash range is 13 yards
-    if target then
-        return spells.SKULL_BASH:cast(target, "Skull Bash")
+    if menu.AUTO_INTERRUPT:get_toggle_state() then
+        if core.spell_book.is_spell_learned(spells.SKULL_BASH.id) and spells.SKULL_BASH:cooldown_up() then
+            local target = funcs.get_interrupt_target(13) -- Skull Bash range is 13 yards
+            if target then
+                if spells.SKULL_BASH:cast(target, "Skull Bash") then return true end
+            end
+        end
     end
 
     -- Dispel
-    local dispel_target, debuff_id, debuff_type = funcs.check_all_dispels(40)
-    if dispel_target then
-        return spells.REMOVE_CORRUPTION:cast(dispel_target, "Remove Corruption (" .. tostring(debuff_id) .. ")",
-            { skip_facing = true })
+    if menu.AUTO_DISPEL:get_toggle_state() then
+        if core.spell_book.is_spell_learned(spells.REMOVE_CORRUPTION.id) and spells.REMOVE_CORRUPTION:cooldown_up() then
+            local dispel_target = funcs.check_all_dispels(40)
+            if dispel_target then
+                if spells.REMOVE_CORRUPTION:cast(dispel_target, "Remove Corruption") then return true end
+            end
+        end
     end
 
+    return false
+end
+
+--------------------------------------------------------------------------------
+-- HELPERS
+--------------------------------------------------------------------------------
+local function shouldbox()
+    if not menu.USE_PUZZLE_BOX:get_state() then return false end
+    if not variable.holdBerserk and spells.TIGERS_FURY:cooldown_up() and frenzy_tf_check() and menu.USE_MINI_CDS:get_toggle_state() then
+        if core.spell_book.is_item_usable(193701) and me:get_item_cooldown(193701) <= 2 then
+            return true
+        end
+    end
     return false
 end
 
@@ -381,7 +415,6 @@ local function on_update()
     funcs.update_enemy_cache()
     update_variables()
 
-    local control_panel_utility = require("common/utility/control_panel_helper")
     control_panel_utility:on_update(menu)
 
     if funcs.check_mark_of_the_wild() then return end
@@ -394,17 +427,15 @@ local function on_update()
     if not me:affecting_combat() then
         if menu.AUTO_TRAVEL:get_state() and me:is_outdoors() then
             if not me:has_buff(lists.BUFFS.TRAVEL_FORM) then
-                spells.TRAVEL_FORM:cast(me, "Auto Travel Form")
-                return
+                if spells.TRAVEL_FORM:cast(me, "Auto Travel Form") then return end
             end
         elseif me:is_indoors() or not menu.AUTO_TRAVEL:get_state() then
+            if me:has_buff(lists.BUFFS.TRAVEL_FORM) then return end
             if not me:has_buff(lists.BUFFS.CAT_FORM) then
-                spells.CAT_FORM:cast(me, "Cat Form")
-                return
+                if spells.CAT_FORM:cast(me, "Cat Form") then return end
             end
             if not me:has_buff(lists.BUFFS.PROWL) and not me:has_buff(lists.BUFFS.SHADOWMELD) then
-                spells.PROWL:cast(me, "Prowl")
-                return
+                if spells.PROWL:cast(me, "Prowl") then return end
             end
         end
         return
@@ -412,8 +443,7 @@ local function on_update()
 
     if me:affecting_combat() then
         if not me:has_buff(lists.BUFFS.CAT_FORM) and not me:is_flying() then
-            spells.CAT_FORM:cast(me, "Cat Form")
-            return
+            if spells.CAT_FORM:cast(me, "Cat Form") then return end
         end
     end
 
@@ -424,30 +454,21 @@ local function on_update()
         end
     end
 
+    -- Kicks and dispels run before anything else, even without a target
+    if actionList.utility() then return end
+
     if not target then return end
 
     local has_bs = me:has_buff(lists.BUFFS.BERSERK) or me:has_buff(lists.BUFFS.INCARNATION)
     local is_prowled = me:has_buff(lists.BUFFS.PROWL) or me:has_buff(lists.BUFFS.SHADOWMELD)
 
     -- APL Main Loop
-
-    if actionList.utility() then return end
-    local function shouldbox()
-        if not menu.USE_PUZZLE_BOX:get_state() then return false end
-        if not variable.holdBerserk and spells.TIGERS_FURY:cooldown_up() and frenzy_tf_check() and menu.USE_MINI_CDS:get_toggle_state() then
-            if core.spell_book.is_item_usable(193701) and me:get_item_cooldown(193701) <= 2 then
-                return true
-            end
-        end
-        return false
-    end
-    if shouldbox() and not me:is_moving() then
+    local want_box = shouldbox()
+    if want_box and not me:is_moving() then
         if spell_queue:queue_item_self(193701, 1, "Puzzle box") then return true end
     end
 
-    if not shouldbox() and menu.USE_MINI_CDS:get_toggle_state() and spells.TIGERS_FURY:cooldown_up() and frenzy_tf_check() and funcs.get_group_time_to_die(8) >= 15 then
-        --core.log("Frantic frenzy cd remains: " .. tostring(core.spell_book.get_spell_cooldown(spells.FRANTIC_FRENZY.id)))
-        --core.log("Feral frenzy cd remains: " .. tostring(core.spell_book.get_spell_cooldown(spells.FERAL_FRENZY.id)))
+    if not want_box and menu.USE_MINI_CDS:get_toggle_state() and spells.TIGERS_FURY:cooldown_up() and frenzy_tf_check() and funcs.get_group_time_to_die(8) >= 15 then
         if spells.TIGERS_FURY:cast(me, "Tiger's Fury") then return end
     end
 
@@ -458,25 +479,28 @@ local function on_update()
     -- if buff.chomp_enabler then cast chomp (ravage) (NYI in simple version unless mapped to FB with ravage)
     if actionList.cooldown(target, spell_targets) then return end
 
-    if me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING) then
-        if spells.FEROCIOUS_BITE:cast(target, "Ferocious Bite (Apex)") then return end
-    end
-
     local is_aoe = spell_targets >= 2
     local energy = me:get_power(3) or 0
 
+    -- Run finishers first so Rip doesn't fall off before spending Apex proc
     if is_aoe then
         if actionList.aoe_finisher(target, spell_targets, combo_points, energy) then return end
     else
-        if actionList.finisher(target, spell_targets, combo_points, energy) then return end
+        if actionList.finisher(target, spell_targets, combo_points, energy, has_bs) then return end
     end
 
+    -- Apex Predator's Craving: free bite after Rip is confirmed safe
+    if me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING) then
+        if spells.FEROCIOUS_BITE:cast(target, "Ferocious Bite (Apex)") then return true end
+    end
+
+    local builder_threshold = 4 + (has_bs and 1 or 0)
     if is_aoe then
-        if combo_points <= 4 then
+        if combo_points <= builder_threshold then
             if actionList.aoe_builder(target, spell_targets, combo_points, energy) then return end
         end
     else
-        if combo_points <= 4 then
+        if combo_points <= builder_threshold then
             if actionList.builder(target, spell_targets, combo_points, energy) then return end
         end
     end

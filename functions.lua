@@ -174,10 +174,11 @@ end
 
 function Functions.update_party_cache()
     local now = core.time()
+    local me = core.object_manager.get_local_player()
     if now - last_party_scan >= 0.2 then
         last_party_scan = now
-        cached_party = unit_helper:get_ally_list_around(core.object_manager.get_local_player():get_position(), 40, true,
-            true)
+        cached_party = unit_helper:get_ally_list_around(me:get_position(), 40, false, true)
+        table.insert(cached_party, me)
     end
 end
 
@@ -375,14 +376,14 @@ function Functions.get_interrupt_target(range)
 
     for _, enemy in ipairs(raw_enemies) do
         local spell_target = spells.SKULL_BASH.id
-        if Functions.validate_enemy(enemy, spell_target, false) then
+        if Functions.validate_enemy(enemy, spell_target, true) then
             if enemy:is_casting_spell() and enemy:is_active_spell_interruptable() then
                 local start_time = enemy:get_active_spell_cast_start_time()
                 local end_time = enemy:get_active_spell_cast_end_time()
                 if start_time and end_time and end_time > start_time then
                     local identifier = tostring(enemy:get_guid()) .. "_" .. tostring(start_time)
                     if not interrupt_cache[identifier] then
-                        interrupt_cache[identifier] = math.random(30, 75)
+                        interrupt_cache[identifier] = math.random(15, 45)
                     end
                     local delay = interrupt_cache[identifier]
 
@@ -397,7 +398,7 @@ function Functions.get_interrupt_target(range)
                 if start_time and end_time and end_time > start_time then
                     local identifier = tostring(enemy:get_guid()) .. "_channel_" .. tostring(start_time)
                     if not interrupt_cache[identifier] then
-                        interrupt_cache[identifier] = math.random(15, 45)
+                        interrupt_cache[identifier] = math.random(10, 30)
                     end
                     local delay = interrupt_cache[identifier]
 
@@ -412,90 +413,93 @@ function Functions.get_interrupt_target(range)
     return nil
 end
 
+local dispel_cache_target = nil
+local dispel_cache_buff = nil
+local dispel_cache_type = nil
+local dispel_ready_time = 0
+local current_dispel_index = 1
+local next_dispel_eval_time = 0
+
 function Functions.check_all_dispels(range)
-    if not menu.AUTO_DISPEL or not menu.AUTO_DISPEL:get_toggle_state() then
+    if not menu.AUTO_DISPEL:get_toggle_state() then
+        dispel_cache_target = nil
         return nil, nil, nil
     end
 
-    if not spells.REMOVE_CORRUPTION:is_learned() or not spells.REMOVE_CORRUPTION:cooldown_up() then
+    local dispel_up = spells.REMOVE_CORRUPTION:is_learned() and spells.REMOVE_CORRUPTION:cooldown_up()
+
+
+    if not dispel_up then
         return nil, nil, nil
     end
 
-    -- Throttle expensive aura checks
     local now = core.time()
-    if now - last_dispel_check < 0.25 then
-        return nil, nil, nil
-    end
-    last_dispel_check = now
 
-    local me = core.object_manager.get_local_player()
-    range = range or 40
-    local allies = {}
-    table.insert(allies, me)
-    for _, ally in ipairs(cached_party) do
-        if not ally:is_unit(me) then
-            table.insert(allies, ally)
+    if dispel_cache_target and dispel_cache_target:is_valid() and not dispel_cache_target:is_dead() then
+        if Functions.has_debuff(dispel_cache_target, dispel_cache_buff) or Functions.has_buff(dispel_cache_target, dispel_cache_buff) then
+            if now < dispel_ready_time then
+                return nil, nil, nil
+            end
+            return dispel_cache_target, dispel_cache_buff, dispel_cache_type
         end
     end
+    dispel_cache_target = nil
 
-    local current_active = {}
-    local ready_ally, ready_buff, ready_type = nil, nil, nil
+    local allies = cached_party
+    local num_allies = #allies
 
-    for _, ally in ipairs(allies) do
+    if num_allies == 0 then return nil, nil, nil end
+    if now < next_dispel_eval_time then
+        return nil, nil, nil
+    end
+
+    range = range or 30
+    local max_checks_per_frame = math.max(1, math.floor(num_allies / 4))
+    local checks_this_frame = 0
+
+    while checks_this_frame < max_checks_per_frame do
+        if current_dispel_index > num_allies then
+            current_dispel_index = 1
+            next_dispel_eval_time = now + 0.25
+            break
+        end
+
+        local ally = allies[current_dispel_index]
+        current_dispel_index = current_dispel_index + 1
+        checks_this_frame = checks_this_frame + 1
+
         if Functions.validate_unit(ally, range) then
-            local guid = tostring(ally:get_guid())
-
-            -- 1. Check special whitelist
             local auras = ally:get_auras()
             if auras then
                 for _, aura in ipairs(auras) do
                     if aura.buff_id and lists.SPECIAL_DISPELS and lists.SPECIAL_DISPELS[aura.buff_id] then
-                        local buff_id = aura.buff_id
-                        local q_key = guid .. "_" .. tostring(buff_id)
-                        current_active[q_key] = true
-
-                        if not dispel_queue[q_key] then
-                            dispel_queue[q_key] = now + (math.random(80, 120) / 100)
-                        end
-
-                        if not ready_ally and now >= dispel_queue[q_key] then
-                            ready_ally, ready_buff, ready_type = ally, buff_id, aura.type
-                        end
+                        dispel_cache_target = ally
+                        dispel_cache_buff = aura.buff_id
+                        dispel_cache_type = aura.type
+                        dispel_ready_time = now + math.random(800, 1400)
+                        return nil, nil, nil
                     end
                 end
             end
 
-            -- 2. Check standard dispellable debuffs (Poison and Curse for Druid)
             local debuffs = ally:get_debuffs()
             if debuffs then
                 for _, debuff in pairs(debuffs) do
                     local t = debuff.type
-                    if t == enums.buff_type.POISON or t == enums.buff_type.CURSE then
-                        local buff_id = debuff.buff_id or 0
-                        local q_key = guid .. "_" .. tostring(buff_id)
-                        current_active[q_key] = true
-
-                        if not dispel_queue[q_key] then
-                            dispel_queue[q_key] = now + (math.random(80, 120) / 100)
-                        end
-
-                        if not ready_ally and now >= dispel_queue[q_key] then
-                            ready_ally, ready_buff, ready_type = ally, buff_id, t
-                        end
+                    if t == enums.buff_type.POISON or
+                        t == enums.buff_type.CURSE then
+                        dispel_cache_target = ally
+                        dispel_cache_buff = debuff.buff_id or 0
+                        dispel_cache_type = t
+                        dispel_ready_time = now + math.random(800, 1400)
+                        return nil, nil, nil
                     end
                 end
             end
         end
     end
 
-    -- Cleanup queue
-    for key, _ in pairs(dispel_queue) do
-        if not current_active[key] then
-            dispel_queue[key] = nil
-        end
-    end
-
-    return ready_ally, ready_buff, ready_type
+    return nil, nil, nil
 end
 
 function Functions.check_mark_of_the_wild()

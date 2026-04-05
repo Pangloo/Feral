@@ -37,6 +37,8 @@ Lists.THREAT_BYPASS_UNITS = {
     -- Units that should be attacked even if they have no threat
     [196642] = true, -- hungry_lasher
     [243208] = true, -- dummy
+    [259569] = true, -- mana battery 1
+    [252825] = true, -- mana battery 2
 }
 
 

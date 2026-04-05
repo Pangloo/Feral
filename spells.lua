@@ -8,20 +8,27 @@ local function create_spell(id)
             return core.spell_book.is_spell_learned(self.id)
         end,
         cooldown_up = function(self)
-            return not spell_helper:is_spell_on_cooldown(self.id)
+            return core.spell_book.get_spell_cooldown(self.id) <= 0
         end,
         cooldown_remains = function(self)
             local current = core.spell_book.get_spell_cooldown(self.id)
             return current or 0
         end,
         cast = function(self, target, reason, options)
+            if not self:is_learned() then return false end
+            if not self:cooldown_up() then return false end
+            if not target then return false end
             options = options or {}
-            local local_player = core.object_manager.get_local_player()
-            if not spell_helper:is_spell_castable(self.id, local_player, target, options.skip_facing, true) then
-                return false
+            if not options.skip_castable then
+                if not core.spell_book.is_usable_spell(self.id) then
+                    return false
+                end
             end
-            spell_queue:queue_spell_target(self.id, target, 1, reason or "Casting Spell")
-            return true
+            if core.input.cast_target_spell(self.id, target) then
+                core.log("Casting spell " .. tostring(self.id) .. " on target " .. tostring(target:get_name()))
+                return true
+            end
+            return false
         end,
         is_castable_to_unit = function(self, unit, options)
             options = options or {}
