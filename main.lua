@@ -8,7 +8,6 @@ local funcs = require("functions")
 local menu = require("menu")
 local ui = require("ui")
 local spell_queue = require("common/modules/spell_queue")
-local spell_helper = require("common/utility/spell_helper")
 local control_panel_utility = require("common/utility/control_panel_helper")
 
 local me = core.object_manager.get_local_player()
@@ -392,7 +391,7 @@ end
 local function shouldbox()
     if not menu.USE_PUZZLE_BOX:get_state() then return false end
     if not variable.holdBerserk and spells.TIGERS_FURY:cooldown_up() and frenzy_tf_check() and menu.USE_MINI_CDS:get_toggle_state() then
-        if core.spell_book.is_item_usable(193701) and me:get_item_cooldown(193701) <= 2 then
+        if core.spell_book.is_item_usable(193701) and me:get_item_cooldown(193701) <= 15 then
             return true
         end
     end
@@ -464,8 +463,8 @@ local function on_update()
 
     -- APL Main Loop
     local want_box = shouldbox()
-    if want_box and not me:is_moving() then
-        if spell_queue:queue_item_self(193701, 1, "Puzzle box") then return true end
+    if want_box and not me:is_moving() and me:get_item_cooldown(193701) == 0 then
+        if core.input.use_item(193701) then return true end
     end
 
     if not want_box and menu.USE_MINI_CDS:get_toggle_state() and spells.TIGERS_FURY:cooldown_up() and frenzy_tf_check() and funcs.get_group_time_to_die(8) >= 15 then

@@ -2,8 +2,6 @@ local enums = require("common/enums")
 local menu = require("menu")
 local spells = require("spells")
 local lists = require("lists")
-local target_selector = require("common/modules/target_selector")
-local health_pred = require("common/modules/health_prediction")
 local buff_manager = require("common/modules/buff_manager")
 local unit_helper = require("common/utility/unit_helper")
 local spell_helper = require("common/utility/spell_helper")
@@ -161,6 +159,8 @@ end
 function Functions.validate_unit(unit, range)
     if not unit or not unit:is_valid() or unit:is_dead() or not (unit:is_party_member() or unit:is_unit(core.object_manager.get_local_player())) then return false end
     if not Chimaeruscheck(unit) then return false end
+    local me = core.object_manager.get_local_player()
+    if me and me:get_guid() ~= unit:get_guid() and not spell_helper:is_spell_in_line_of_sight(spells.REGROWTH.id, me, unit) then return false end
     if range then
         local me = core.object_manager.get_local_player()
         local dist = unit:distance()
@@ -233,9 +233,20 @@ function Functions.validate_enemy(unit, spell_id, facing)
         return false
     end
 
-    local me = core.object_manager.get_local_player()
+    if me and not spell_helper:is_spell_in_line_of_sight(spell_id or spells.SHRED.id, me, unit) then
+        return false
+    end
+
     if spell_id then
-        if not spell_helper:is_spell_in_range(spell_id, unit, me:get_position(), unit:get_position()) then
+        if spell_id == spells.SWIPE_CAT.id or spell_id == spells.THRASH_CAT.id or spell_id == spells.BRUTAL_SLASH.id or spell_id == spells.PRIMAL_WRATH.id then
+            local dist = unit:distance()
+            if me then
+                dist = math.max(0, dist - unit:get_bounding_radius() - me:get_bounding_radius())
+            end
+            if dist > 8 then
+                return false
+            end
+        elseif not core.spell_book.is_spell_in_range(spell_id, unit) then
             return false
         end
     end
@@ -249,11 +260,19 @@ function Functions.get_enemies_around_me(range)
     local me = core.object_manager.get_local_player()
     local checkspell = spells.SHRED.id
     if not me then return raw_enemies end
-    if range == 8 then checkspell = spells.THRASH_CAT.id end
+    if range == 8 then checkspell = spells.SWIPE_CAT.id end
 
     for _, obj in ipairs(cached_enemies) do
         if obj:is_valid() and not obj:is_dead() then
-            if spell_helper:is_spell_in_range(checkspell, obj, me:get_position(), obj:get_position()) then
+            if checkspell == spells.SWIPE_CAT.id or checkspell == spells.THRASH_CAT.id or checkspell == spells.BRUTAL_SLASH.id or checkspell == spells.PRIMAL_WRATH.id then
+                local dist = obj:distance()
+                if me then
+                    dist = math.max(0, dist - obj:get_bounding_radius() - me:get_bounding_radius())
+                end
+                if dist <= 8 then
+                    table.insert(raw_enemies, obj)
+                end
+            elseif core.spell_book.is_spell_in_range(checkspell, obj) then
                 table.insert(raw_enemies, obj)
             end
         end
@@ -293,7 +312,7 @@ function Functions.count_enemies_in_range(range)
     local raw_enemies = Functions.get_enemies_around_me(range)
     local count = 0
     for _, enemy in ipairs(raw_enemies) do
-        local spell_target = spells.THRASH_CAT.id
+        local spell_target = spells.SWIPE_CAT.id
         if Functions.validate_enemy(enemy, spell_target, false) then
             count = count + 1
         end
@@ -305,9 +324,9 @@ function Functions.get_all_enemies_in_range(range, spell_id)
     local raw_enemies = Functions.get_enemies_around_me(range)
     local enemies = {}
     for _, enemy in ipairs(raw_enemies) do
-        local target_spell = spell_id or spells.THRASH_CAT.id
+        local target_spell = spell_id or spells.SWIPE_CAT.id
         local facingcheck = true
-        if spell_id == spells.PRIMAL_WRATH.id then
+        if spell_id == spells.SWIPE_CAT.id then
             facingcheck = false
         end
         if Functions.validate_enemy(enemy, target_spell, facingcheck) then
@@ -320,7 +339,7 @@ end
 function Functions.get_best_dot_target(debuff_id, spell_id, refresh_time, current_target, min_ttd)
     min_ttd = min_ttd or 0
     local facingcheck = true
-    if spell_id == spells.PRIMAL_WRATH.id then
+    if spell_id == spells.SWIPE_CAT.id then
         facingcheck = false
     end
     if current_target and Functions.validate_enemy(current_target, spell_id, facingcheck) then
@@ -351,7 +370,7 @@ end
 function Functions.any_missing_rip(range, threshold, min_ttd)
     local raw_enemies = Functions.get_enemies_around_me(range)
     for _, enemy in ipairs(raw_enemies) do
-        if Functions.validate_enemy(enemy, spells.THRASH_CAT.id, false) then
+        if Functions.validate_enemy(enemy, spells.SWIPE_CAT.id, false) then
             local remains = Functions.get_debuff_remains(enemy, lists.DEBUFFS.RIP)
             if remains < (threshold or 5) and Functions.get_time_to_die(enemy) >= (min_ttd or 7) then
                 return true
