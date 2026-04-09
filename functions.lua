@@ -68,7 +68,7 @@ local last_ttd_clear = 0
 
 function Functions.get_time_to_die(unit)
     if not unit or not unit:is_valid() or unit:is_dead() then return 0 end
-    if unit:is_boss() then return 9999 end
+    if unit.get_npc_id and lists.TTD_BYPASS_UNITS[unit:get_npc_id()] then return 9999 end
 
     local guid = tostring(unit:get_guid())
     local now = core.time()
@@ -380,51 +380,50 @@ function Functions.any_missing_rip(range, threshold, min_ttd)
     return false
 end
 
+--------------------------------------------------------------------------------
+-- INTERRUPT (time-elapsed delay: kick between 1.1s and 1.4s after cast start)
+--------------------------------------------------------------------------------
 local interrupt_cache = {}
 local last_interrupt_clear = 0
+local INTERRUPT_CLEANUP_INTERVAL = 5
+local INTERRUPT_MIN_DELAY_MS = 1100
+local INTERRUPT_MAX_DELAY_MS = 1400
 
 function Functions.get_interrupt_target(range)
     local raw_enemies = Functions.get_enemies_around_me(range)
     local now = core.game_time()
     local real_now = core.time()
 
-    if real_now - last_interrupt_clear > 15000 then
-        interrupt_cache = {}
+    if real_now - last_interrupt_clear > INTERRUPT_CLEANUP_INTERVAL then
+        for k in pairs(interrupt_cache) do interrupt_cache[k] = nil end
         last_interrupt_clear = real_now
     end
 
+    local check_spell = spells.SKULL_BASH.id
     for _, enemy in ipairs(raw_enemies) do
-        local spell_target = spells.SKULL_BASH.id
-        if Functions.validate_enemy(enemy, spell_target, true) then
+        if Functions.validate_enemy(enemy, check_spell, true) then
+            local start_time, end_time, key
             if enemy:is_casting_spell() and enemy:is_active_spell_interruptable() then
-                local start_time = enemy:get_active_spell_cast_start_time()
-                local end_time = enemy:get_active_spell_cast_end_time()
-                if start_time and end_time and end_time > start_time then
-                    local identifier = tostring(enemy:get_guid()) .. "_" .. tostring(start_time)
-                    if not interrupt_cache[identifier] then
-                        interrupt_cache[identifier] = math.random(15, 45)
-                    end
-                    local delay = interrupt_cache[identifier]
-
-                    local pct = ((now - start_time) / (end_time - start_time)) * 100
-                    if pct >= delay then
-                        return enemy
-                    end
-                end
+                start_time = enemy:get_active_spell_cast_start_time()
+                end_time = enemy:get_active_spell_cast_end_time()
+                key = tostring(enemy:get_guid()) .. "_" .. tostring(start_time)
             elseif enemy:is_channelling_spell() and enemy:is_active_spell_interruptable() then
-                local start_time = enemy:get_active_channel_cast_start_time()
-                local end_time = enemy:get_active_channel_cast_end_time()
-                if start_time and end_time and end_time > start_time then
-                    local identifier = tostring(enemy:get_guid()) .. "_channel_" .. tostring(start_time)
-                    if not interrupt_cache[identifier] then
-                        interrupt_cache[identifier] = math.random(10, 30)
-                    end
-                    local delay = interrupt_cache[identifier]
+                start_time = enemy:get_active_channel_cast_start_time()
+                end_time = enemy:get_active_channel_cast_end_time()
+                key = tostring(enemy:get_guid()) .. "_c_" .. tostring(start_time)
+            end
 
-                    local pct = ((now - start_time) / (end_time - start_time)) * 100
-                    if pct >= delay then
-                        return enemy
-                    end
+            if start_time and end_time and end_time > start_time then
+                if not interrupt_cache[key] then
+                    interrupt_cache[key] = math.random(INTERRUPT_MIN_DELAY_MS, INTERRUPT_MAX_DELAY_MS)
+                end
+                local delay = interrupt_cache[key]
+
+                local elapsed = now - start_time
+                -- Only fire if we still have time before the cast finishes,
+                -- otherwise we'd waste the kick on a spell that's already done.
+                if elapsed >= delay and now < end_time then
+                    return enemy
                 end
             end
         end
@@ -432,12 +431,42 @@ function Functions.get_interrupt_target(range)
     return nil
 end
 
+--------------------------------------------------------------------------------
+-- DISPEL (time-elapsed delay: dispel between 0.9s and 1.5s after debuff seen)
+--------------------------------------------------------------------------------
 local dispel_cache_target = nil
 local dispel_cache_buff = nil
 local dispel_cache_type = nil
-local dispel_ready_time = 0
 local current_dispel_index = 1
 local next_dispel_eval_time = 0
+
+-- Per-(ally,buff) first-seen tracking so we delay reaction by a human-like amount.
+-- key = ally_guid .. "_" .. buff_id  →  { first_seen = <core.time()>, delay = <seconds> }
+local dispel_seen = {}
+local last_dispel_seen_clear = 0
+local DISPEL_SEEN_CLEANUP_INTERVAL = 5
+local DISPEL_SEEN_STALE_TIME = 10
+local DISPEL_MIN_DELAY = 0.9
+local DISPEL_MAX_DELAY = 1.5
+
+local function dispel_seen_key(ally, buff_id)
+    return tostring(ally:get_guid()) .. "_" .. tostring(buff_id)
+end
+
+-- Returns true if the (ally, buff) pair has been observed long enough to react.
+-- Records first-seen on the first call and assigns a randomized delay.
+local function dispel_delay_ready(ally, buff_id, now)
+    local key = dispel_seen_key(ally, buff_id)
+    local entry = dispel_seen[key]
+    if not entry then
+        dispel_seen[key] = {
+            first_seen = now,
+            delay = DISPEL_MIN_DELAY + math.random() * (DISPEL_MAX_DELAY - DISPEL_MIN_DELAY),
+        }
+        return false
+    end
+    return (now - entry.first_seen) >= entry.delay
+end
 
 function Functions.check_all_dispels(range)
     if not menu.AUTO_DISPEL:get_toggle_state() then
@@ -447,19 +476,29 @@ function Functions.check_all_dispels(range)
 
     local dispel_up = spells.REMOVE_CORRUPTION:is_learned() and spells.REMOVE_CORRUPTION:cooldown_up()
 
-
     if not dispel_up then
         return nil, nil, nil
     end
 
     local now = core.time()
 
+    -- Periodically drop stale first-seen entries (debuff fell off, ally despawned, etc.)
+    if now - last_dispel_seen_clear > DISPEL_SEEN_CLEANUP_INTERVAL then
+        for k, v in pairs(dispel_seen) do
+            if now - v.first_seen > DISPEL_SEEN_STALE_TIME then
+                dispel_seen[k] = nil
+            end
+        end
+        last_dispel_seen_clear = now
+    end
+
     if dispel_cache_target and dispel_cache_target:is_valid() and not dispel_cache_target:is_dead() then
         if Functions.has_debuff(dispel_cache_target, dispel_cache_buff) or Functions.has_buff(dispel_cache_target, dispel_cache_buff) then
-            if now < dispel_ready_time then
-                return nil, nil, nil
+            if dispel_delay_ready(dispel_cache_target, dispel_cache_buff, now) then
+                return dispel_cache_target, dispel_cache_buff, dispel_cache_type
             end
-            return dispel_cache_target, dispel_cache_buff, dispel_cache_type
+            -- Still cached, but the human-reaction delay hasn't elapsed yet.
+            return nil, nil, nil
         end
     end
     dispel_cache_target = nil
@@ -495,7 +534,9 @@ function Functions.check_all_dispels(range)
                         dispel_cache_target = ally
                         dispel_cache_buff = aura.buff_id
                         dispel_cache_type = aura.type
-                        dispel_ready_time = now + math.random(800, 1400)
+                        if dispel_delay_ready(ally, aura.buff_id, now) then
+                            return dispel_cache_target, dispel_cache_buff, dispel_cache_type
+                        end
                         return nil, nil, nil
                     end
                 end
@@ -507,10 +548,13 @@ function Functions.check_all_dispels(range)
                     local t = debuff.type
                     if t == enums.buff_type.POISON or
                         t == enums.buff_type.CURSE then
+                        local bid = debuff.buff_id or 0
                         dispel_cache_target = ally
-                        dispel_cache_buff = debuff.buff_id or 0
+                        dispel_cache_buff = bid
                         dispel_cache_type = t
-                        dispel_ready_time = now + math.random(800, 1400)
+                        if dispel_delay_ready(ally, bid, now) then
+                            return dispel_cache_target, dispel_cache_buff, dispel_cache_type
+                        end
                         return nil, nil, nil
                     end
                 end

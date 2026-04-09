@@ -1,3 +1,5 @@
+local spell_queue = require("common/modules/spell_queue")
+
 local function create_spell(id, is_off_gcd)
     return {
         id = id,
@@ -27,14 +29,17 @@ local function create_spell(id, is_off_gcd)
                     return false
                 end
             end
-            if core.input.cast_target_spell(self.id, target) then
-                if self.is_off_gcd then
+            if self.is_off_gcd then
+                if core.input.cast_target_spell(self.id, target) then
                     self.last_cast = core.time()
+                    core.log("Casting spell " .. tostring(self.id) .. " on target " .. tostring(target:get_name()))
+                    return true
                 end
-                core.log("Casting spell " .. tostring(self.id) .. " on target " .. tostring(target:get_name()))
-                return true
+                return false
             end
-            return false
+            spell_queue:queue_spell_target(self.id, target, options.priority or 1)
+            --core.log("Queuing spell " .. tostring(self.id) .. " on target " .. tostring(target:get_name()))
+            return true
         end
     }
 end
