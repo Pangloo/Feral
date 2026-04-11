@@ -267,7 +267,7 @@ end
 
 -- APL: aoe_finisher
 actionList.aoe_finisher = function(target, spell_targets, combo_points, energy)
-    local rip_thresh = 5
+    local rip_thresh = 6.5
 
     -- Primal Wrath: Only cast if a target in range has the dot expiring within 5 seconds
     if core.spell_book.is_spell_learned(spells.PRIMAL_WRATH.id) and combo_points >= 5 and spell_targets > 1 then
@@ -290,9 +290,9 @@ actionList.aoe_finisher = function(target, spell_targets, combo_points, energy)
 
     -- Ferocious Bite / Ravage (Prioritized if no dot maintenance was performed)
     local has_bs = me:has_buff(lists.BUFFS.BERSERK) or me:has_buff(lists.BUFFS.INCARNATION)
-    local bite_cost = has_bs and 25 or 50
-    local min_cp = 4 + (has_bs and 1 or 0)
-    if (combo_points >= min_cp or me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING)) and not funcs.any_missing_rip(8, 5, 7) then
+    local bite_cost = 25
+    local min_cp = 5
+    if (combo_points >= min_cp and not funcs.any_missing_rip(8, 5, 7)) or me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING) then
         if energy < bite_cost and not me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING) then return true end
         local reason = me:has_buff(lists.BUFFS.RAVAGE) and "Ferocious Bite (Ravage)" or "Ferocious Bite (AoE)"
         if spells.FEROCIOUS_BITE:cast(target, reason) then return true end
@@ -345,7 +345,7 @@ end
 actionList.finisher = function(target, spell_targets, combo_points, energy, has_bs)
     local rip_thresh = 7
 
-    if combo_points >= 5 then
+    if combo_points >= 4 then
         local rip_target = funcs.get_best_dot_target(lists.DEBUFFS.RIP, spells.RIP.id, rip_thresh, target, 7)
         if rip_target then
             if energy < 30 then return true end
@@ -353,7 +353,7 @@ actionList.finisher = function(target, spell_targets, combo_points, energy, has_
         end
     end
 
-    local bite_cost = has_bs and 25 or 50
+    local bite_cost = 25
     if combo_points >= 4 + (has_bs and 1 or 0) and not funcs.any_missing_rip(8, 5, 7) then
         if energy < bite_cost and not me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING) then return true end
         if spells.FEROCIOUS_BITE:cast(target, "Ferocious Bite") then return true end
@@ -365,7 +365,7 @@ end
 actionList.utility = function()
     if menu.AUTO_INTERRUPT:get_toggle_state() then
         if core.spell_book.is_spell_learned(spells.SKULL_BASH.id) and spells.SKULL_BASH:cooldown_up() then
-            local target = funcs.get_interrupt_target(13) -- Skull Bash range is 13 yards
+            local target = funcs.get_interrupt_target()
             if target then
                 if spells.SKULL_BASH:cast(target, "Skull Bash") then return true end
             end
@@ -375,7 +375,7 @@ actionList.utility = function()
     -- Dispel
     if menu.AUTO_DISPEL:get_toggle_state() then
         if core.spell_book.is_spell_learned(spells.REMOVE_CORRUPTION.id) and spells.REMOVE_CORRUPTION:cooldown_up() then
-            local dispel_target = funcs.check_all_dispels(40)
+            local dispel_target = funcs.check_all_dispels()
             if dispel_target then
                 if spells.REMOVE_CORRUPTION:cast(dispel_target, "Remove Corruption") then return true end
             end
@@ -441,9 +441,16 @@ local function on_update()
     end
 
     if me:affecting_combat() then
-        if not me:has_buff(lists.BUFFS.CAT_FORM) and not me:is_flying() then
-            if spells.CAT_FORM:cast(me, "Cat Form") then return end
+        if spells.FLUID_FORM:is_learned() and target then
+            if not me:has_buff(lists.BUFFS.CAT_FORM) and not me:is_flying() then
+                if spells.RAKE:cast(target, "Fluid Form Rake") then return end
+            end
+        else
+            if not me:has_buff(lists.BUFFS.CAT_FORM) and not me:is_flying() then
+                if spells.CAT_FORM:cast(target, "Cat Form") then return end
+            end
         end
+
     end
 
     if me:has_buff(lists.BUFFS.PREDATORY_SWIFTNESS) and variable.regrowth then

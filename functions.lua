@@ -8,6 +8,13 @@ local spell_helper = require("common/utility/spell_helper")
 
 local Functions = {}
 
+-- Wipe a table without creating a new one
+local function wipe(t)
+    for k in pairs(t) do
+        t[k] = nil
+    end
+end
+
 function Functions.get_debuff_remains(unit, debuff_id)
     if not unit or not unit:is_valid() then return 0 end
     if type(debuff_id) == "number" then
@@ -51,14 +58,12 @@ function Functions.has_buff(unit, buff_id)
     return buff_info and buff_info.is_active == true
 end
 
-local cached_dps_target = nil
-local cached_dps_target_valid = false
 local cached_party = {}
+local cached_unit_data = {}   -- per-ally: in_los, is_dead
 local cached_enemies = {}
+local cached_enemy_data = {}  -- per-enemy: in_los, facing, melee_dist
 local last_party_scan = 0
 local last_enemy_scan = 0
-local dispel_queue = {}
-local last_dispel_check = 0
 local last_motw_check = 0
 local motw_cast_time = 0
 local motw_is_missing = false
@@ -68,7 +73,10 @@ local last_ttd_clear = 0
 
 function Functions.get_time_to_die(unit)
     if not unit or not unit:is_valid() or unit:is_dead() then return 0 end
-    if unit.get_npc_id and lists.TTD_BYPASS_UNITS[unit:get_npc_id()] then return 9999 end
+    if unit.get_npc_id then
+        local npc_id = unit:get_npc_id()
+        if lists.TTD_BYPASS_UNITS[npc_id] or lists.BOSS_BYPASS_UNITS[npc_id] then return 9999 end
+    end
 
     local guid = tostring(unit:get_guid())
     local now = core.time()
@@ -156,29 +164,46 @@ local function Chimaeruscheck(obj)
     return me:get_unit_phase() == obj:get_unit_phase()
 end
 
-function Functions.validate_unit(unit, range)
-    if not unit or not unit:is_valid() or unit:is_dead() or not (unit:is_party_member() or unit:is_unit(core.object_manager.get_local_player())) then return false end
-    if not Chimaeruscheck(unit) then return false end
-    local me = core.object_manager.get_local_player()
-    if me and me:get_guid() ~= unit:get_guid() and not spell_helper:is_spell_in_line_of_sight(spells.REGROWTH.id, me, unit) then return false end
-    if range then
-        local me = core.object_manager.get_local_player()
-        local dist = unit:distance()
-        if me then
-            dist = math.max(0, dist - unit:get_bounding_radius() - me:get_bounding_radius())
-        end
-        if dist > range then return false end
-    end
-    return true
+function Functions.validate_unit(unit)
+    if not unit or not unit:is_valid() then return false end
+    local guid = unit:get_guid()
+    local data = cached_unit_data[guid]
+    if not data then return false end
+    if data.is_dead then return false end
+    return data.in_los
 end
 
 function Functions.update_party_cache()
     local now = core.time()
-    local me = core.object_manager.get_local_player()
     if now - last_party_scan >= 0.2 then
         last_party_scan = now
+        local me = core.object_manager.get_local_player()
+        if not me then return end
         cached_party = unit_helper:get_ally_list_around(me:get_position(), 40, false, true)
+        wipe(cached_unit_data)
         table.insert(cached_party, me)
+
+        local my_guid = me:get_guid()
+        local check_spell = spells.REGROWTH.id
+
+        for _, ally in ipairs(cached_party) do
+            if ally and ally:is_valid() and Chimaeruscheck(ally) then
+                local guid = ally:get_guid()
+                local is_dead = ally:is_dead()
+                local in_los = false
+                if not is_dead then
+                    if guid == my_guid then
+                        in_los = true
+                    else
+                        in_los = spell_helper:is_spell_in_line_of_sight(check_spell, me, ally)
+                    end
+                end
+                cached_unit_data[guid] = {
+                    in_los = in_los,
+                    is_dead = is_dead,
+                }
+            end
+        end
     end
 end
 
@@ -186,17 +211,28 @@ function Functions.update_enemy_cache()
     local now = core.time()
     if now - last_enemy_scan >= 0.2 then
         last_enemy_scan = now
-        cached_enemies = {}
+        local idx = 0
         local me = core.object_manager.get_local_player()
-        if not me then return end
+        if not me then
+            wipe(cached_enemies)
+            wipe(cached_enemy_data)
+            return
+        end
+
+        wipe(cached_enemy_data)
+        local check_spell = spells.SHRED.id
+        local my_bounding = me:get_bounding_radius()
+        local blacklist = lists.ENEMY_BLACKLIST_WITH_BUFFS
+        local bypass = lists.THREAT_BYPASS_UNITS
+        local boss_bypass = lists.BOSS_BYPASS_UNITS
 
         local objects = core.object_manager.get_visible_objects()
         for _, obj in ipairs(objects) do
-            if obj:is_valid() and obj:is_unit() and not obj:is_dead() and me:can_attack(obj) and ((me:get_threat_situation(obj) ~= nil and obj:is_in_combat()) or lists.THREAT_BYPASS_UNITS[obj:get_npc_id()]) then
+            if obj:is_valid() and obj:is_unit() and not obj:is_dead() and me:can_attack(obj) and ((me:get_threat_situation(obj) ~= nil and obj:is_in_combat()) or bypass[obj:get_npc_id()] or boss_bypass[obj:get_npc_id()]) then
                 local is_blacklisted = false
                 local npc_id = obj:get_npc_id()
-                if lists.ENEMY_BLACKLIST_WITH_BUFFS and lists.ENEMY_BLACKLIST_WITH_BUFFS[npc_id] then
-                    for _, buff_id in ipairs(lists.ENEMY_BLACKLIST_WITH_BUFFS[npc_id]) do
+                if blacklist and blacklist[npc_id] then
+                    for _, buff_id in ipairs(blacklist[npc_id]) do
                         if Functions.get_buff_remains(obj, buff_id) > 0 then
                             is_blacklisted = true
                             break
@@ -205,9 +241,24 @@ function Functions.update_enemy_cache()
                 end
 
                 if not is_blacklisted and Chimaeruscheck(obj) then
-                    table.insert(cached_enemies, obj)
+                    idx = idx + 1
+                    cached_enemies[idx] = obj
+
+                    local guid = obj:get_guid()
+                    local in_los = spell_helper:is_spell_in_line_of_sight(check_spell, me, obj)
+                    local melee_dist = math.max(0, obj:distance() - obj:get_bounding_radius() - my_bounding)
+                    local in_shred_range = core.spell_book.is_spell_in_range(check_spell, obj)
+                    cached_enemy_data[guid] = {
+                        in_los = in_los,
+                        facing = in_los and me:is_looking_at(obj) or false,
+                        melee_dist = melee_dist,
+                        in_shred_range = in_shred_range and in_los,
+                    }
                 end
             end
+        end
+        for i = idx + 1, #cached_enemies do
+            cached_enemies[i] = nil
         end
     end
 end
@@ -216,91 +267,57 @@ function Functions.get_cached_party()
     return cached_party
 end
 
-function Functions.validate_enemy(unit, spell_id, facing)
-    local me = core.object_manager.get_local_player()
-    if not (unit:is_valid() and unit:is_unit() and not unit:is_dead() and me:can_attack(unit) and ((me:get_threat_situation(unit) ~= nil and unit:is_in_combat()) or lists.THREAT_BYPASS_UNITS[unit:get_npc_id()])) then return false end
-
-    local npc_id = unit:get_npc_id()
-    if lists.ENEMY_BLACKLIST_WITH_BUFFS and lists.ENEMY_BLACKLIST_WITH_BUFFS[npc_id] then
-        for _, buff_id in ipairs(lists.ENEMY_BLACKLIST_WITH_BUFFS[npc_id]) do
-            if Functions.get_buff_remains(unit, buff_id) > 0 then
-                return false
-            end
-        end
-    end
-
-    if not Chimaeruscheck(unit) then
-        return false
-    end
-
-    if me and not spell_helper:is_spell_in_line_of_sight(spell_id or spells.SHRED.id, me, unit) then
-        return false
-    end
-
-    if spell_id then
-        if spell_id == spells.SWIPE_CAT.id or spell_id == spells.THRASH_CAT.id or spell_id == spells.BRUTAL_SLASH.id or spell_id == spells.PRIMAL_WRATH.id then
-            local dist = unit:distance()
-            if me then
-                dist = math.max(0, dist - unit:get_bounding_radius() - me:get_bounding_radius())
-            end
-            if dist > 8 then
-                return false
-            end
-        elseif not core.spell_book.is_spell_in_range(spell_id, unit) then
-            return false
-        end
-    end
-
-    if me and facing and not me:is_looking_at(unit) then return false end
+-- facing: require facing check; melee_only: restrict to 8yd melee range
+function Functions.validate_enemy(unit, facing, melee_only)
+    if not unit or not unit:is_valid() then return false end
+    local guid = unit:get_guid()
+    local data = cached_enemy_data[guid]
+    if not data then return false end
+    if not data.in_los then return false end
+    if facing and not data.facing then return false end
+    if melee_only and data.melee_dist > 8 then return false end
+    if not melee_only and not data.in_shred_range then return false end
     return true
 end
 
+-- range == 8 returns melee enemies, anything else returns shred-range enemies
 function Functions.get_enemies_around_me(range)
-    local raw_enemies = {}
-    local me = core.object_manager.get_local_player()
-    local checkspell = spells.SHRED.id
-    if not me then return raw_enemies end
-    if range == 8 then checkspell = spells.SWIPE_CAT.id end
-
+    local melee = (range == 8)
+    local result = {}
     for _, obj in ipairs(cached_enemies) do
-        if obj:is_valid() and not obj:is_dead() then
-            if checkspell == spells.SWIPE_CAT.id or checkspell == spells.THRASH_CAT.id or checkspell == spells.BRUTAL_SLASH.id or checkspell == spells.PRIMAL_WRATH.id then
-                local dist = obj:distance()
-                if me then
-                    dist = math.max(0, dist - obj:get_bounding_radius() - me:get_bounding_radius())
+        local guid = obj:get_guid()
+        local data = cached_enemy_data[guid]
+        if data and data.in_los then
+            if melee then
+                if data.melee_dist <= 8 then
+                    result[#result + 1] = obj
                 end
-                if dist <= 8 then
-                    table.insert(raw_enemies, obj)
+            else
+                if data.in_shred_range then
+                    result[#result + 1] = obj
                 end
-            elseif core.spell_book.is_spell_in_range(checkspell, obj) then
-                table.insert(raw_enemies, obj)
             end
         end
     end
-    return raw_enemies
+    return result
 end
 
-function Functions.get_dps_target(range)
-    range = range or 5
+function Functions.get_dps_target()
     local me = core.object_manager.get_local_player()
+    if not me then return nil end
     local target = me:get_target()
-    local spell_target = spells.SHRED.id
-    if target and Functions.validate_enemy(target, spell_target, true) then
+    if target and Functions.validate_enemy(target, true) then
         return target
     end
-    -- Fallback to nearest
-    local raw_enemies = Functions.get_enemies_around_me(range)
+    -- Fallback to nearest melee enemy
     local best_enemy = nil
     local min_dist = 999
-    for _, enemy in ipairs(raw_enemies) do
-        local spell_target = spells.SHRED.id
-        if Functions.validate_enemy(enemy, spell_target, true) then
-            local dist = enemy:distance()
-            if me then
-                dist = math.max(0, dist - enemy:get_bounding_radius() - me:get_bounding_radius())
-            end
-            if dist < min_dist then
-                min_dist = dist
+    for _, enemy in ipairs(cached_enemies) do
+        local guid = enemy:get_guid()
+        local data = cached_enemy_data[guid]
+        if data and data.in_los and data.facing and data.in_shred_range then
+            if data.melee_dist < min_dist then
+                min_dist = data.melee_dist
                 best_enemy = enemy
             end
         end
@@ -309,49 +326,56 @@ function Functions.get_dps_target(range)
 end
 
 function Functions.count_enemies_in_range(range)
-    local raw_enemies = Functions.get_enemies_around_me(range)
+    local melee = (range == 8)
     local count = 0
-    for _, enemy in ipairs(raw_enemies) do
-        local spell_target = spells.SWIPE_CAT.id
-        if Functions.validate_enemy(enemy, spell_target, false) then
-            count = count + 1
+    for _, enemy in ipairs(cached_enemies) do
+        local guid = enemy:get_guid()
+        local data = cached_enemy_data[guid]
+        if data and data.in_los then
+            if melee then
+                if data.melee_dist <= 8 then count = count + 1 end
+            else
+                if data.in_shred_range then count = count + 1 end
+            end
         end
     end
     return math.max(1, count)
 end
 
 function Functions.get_all_enemies_in_range(range, spell_id)
-    local raw_enemies = Functions.get_enemies_around_me(range)
-    local enemies = {}
-    for _, enemy in ipairs(raw_enemies) do
-        local target_spell = spell_id or spells.SWIPE_CAT.id
-        local facingcheck = true
-        if spell_id == spells.SWIPE_CAT.id then
-            facingcheck = false
-        end
-        if Functions.validate_enemy(enemy, target_spell, facingcheck) then
-            table.insert(enemies, enemy)
+    local melee = (range == 8) or (spell_id == spells.SWIPE_CAT.id)
+    local need_facing = (spell_id ~= spells.SWIPE_CAT.id)
+    local result = {}
+    for _, enemy in ipairs(cached_enemies) do
+        local guid = enemy:get_guid()
+        local data = cached_enemy_data[guid]
+        if data and data.in_los then
+            if need_facing and not data.facing then
+                -- skip
+            elseif melee then
+                if data.melee_dist <= 8 then result[#result + 1] = enemy end
+            else
+                if data.in_shred_range then result[#result + 1] = enemy end
+            end
         end
     end
-    return enemies
+    return result
 end
 
 function Functions.get_best_dot_target(debuff_id, spell_id, refresh_time, current_target, min_ttd)
     min_ttd = min_ttd or 0
-    local facingcheck = true
-    if spell_id == spells.SWIPE_CAT.id then
-        facingcheck = false
-    end
-    if current_target and Functions.validate_enemy(current_target, spell_id, facingcheck) then
-        if Functions.get_debuff_remains(current_target, debuff_id) < refresh_time and Functions.get_time_to_die(current_target) >= min_ttd then
-            return current_target
+    local need_facing = (spell_id ~= spells.SWIPE_CAT.id)
+    local is_melee = (spell_id ~= spells.MOONFIRE_CAT.id)
+    if current_target then
+        local data = cached_enemy_data[current_target:is_valid() and current_target:get_guid() or 0]
+        if data and data.in_los and (not need_facing or data.facing) and (not is_melee or data.melee_dist <= 8) then
+            if Functions.get_debuff_remains(current_target, debuff_id) < refresh_time and Functions.get_time_to_die(current_target) >= min_ttd then
+                return current_target
+            end
         end
     end
 
-    local search_range = 8
-    if spell_id == spells.MOONFIRE_CAT.id then
-        search_range = 40
-    end
+    local search_range = is_melee and 8 or 40
     local enemies = Functions.get_all_enemies_in_range(search_range, spell_id)
     local best_target = nil
     local min_remains = 999
@@ -368,9 +392,9 @@ function Functions.get_best_dot_target(debuff_id, spell_id, refresh_time, curren
 end
 
 function Functions.any_missing_rip(range, threshold, min_ttd)
-    local raw_enemies = Functions.get_enemies_around_me(range)
-    for _, enemy in ipairs(raw_enemies) do
-        if Functions.validate_enemy(enemy, spells.SWIPE_CAT.id, false) then
+    for _, enemy in ipairs(cached_enemies) do
+        local data = cached_enemy_data[enemy:get_guid()]
+        if data and data.in_los and data.melee_dist <= 8 then
             local remains = Functions.get_debuff_remains(enemy, lists.DEBUFFS.RIP)
             if remains < (threshold or 5) and Functions.get_time_to_die(enemy) >= (min_ttd or 7) then
                 return true
@@ -386,11 +410,10 @@ end
 local interrupt_cache = {}
 local last_interrupt_clear = 0
 local INTERRUPT_CLEANUP_INTERVAL = 5
-local INTERRUPT_MIN_DELAY_MS = 1100
-local INTERRUPT_MAX_DELAY_MS = 1400
+local INTERRUPT_MIN_DELAY_MS = 900
+local INTERRUPT_MAX_DELAY_MS = 1050
 
-function Functions.get_interrupt_target(range)
-    local raw_enemies = Functions.get_enemies_around_me(range)
+function Functions.get_interrupt_target()
     local now = core.game_time()
     local real_now = core.time()
 
@@ -399,9 +422,8 @@ function Functions.get_interrupt_target(range)
         last_interrupt_clear = real_now
     end
 
-    local check_spell = spells.SKULL_BASH.id
-    for _, enemy in ipairs(raw_enemies) do
-        if Functions.validate_enemy(enemy, check_spell, true) then
+    for _, enemy in ipairs(cached_enemies) do
+        if Functions.validate_enemy(enemy, true) then
             local start_time, end_time, key
             if enemy:is_casting_spell() and enemy:is_active_spell_interruptable() then
                 start_time = enemy:get_active_spell_cast_start_time()
@@ -468,7 +490,7 @@ local function dispel_delay_ready(ally, buff_id, now)
     return (now - entry.first_seen) >= entry.delay
 end
 
-function Functions.check_all_dispels(range)
+function Functions.check_all_dispels()
     if not menu.AUTO_DISPEL:get_toggle_state() then
         dispel_cache_target = nil
         return nil, nil, nil
@@ -511,7 +533,6 @@ function Functions.check_all_dispels(range)
         return nil, nil, nil
     end
 
-    range = range or 30
     local max_checks_per_frame = math.max(1, math.floor(num_allies / 4))
     local checks_this_frame = 0
 
@@ -526,7 +547,7 @@ function Functions.check_all_dispels(range)
         current_dispel_index = current_dispel_index + 1
         checks_this_frame = checks_this_frame + 1
 
-        if Functions.validate_unit(ally, range) then
+        if Functions.validate_unit(ally) then
             local auras = ally:get_auras()
             if auras then
                 for _, aura in ipairs(auras) do
@@ -586,7 +607,7 @@ function Functions.check_mark_of_the_wild()
             missing_buff = true
         else
             for _, ally in ipairs(party) do
-                if Functions.validate_unit(ally, 40) then
+                if Functions.validate_unit(ally) then
                     if Functions.get_buff_remains(ally, 1126) == 0 then
                         missing_buff = true
                         break

@@ -99,6 +99,12 @@ Lists.TTD_BYPASS_UNITS = {
     [36658] = true, -- scourgelord-tyrannus
 }
 
+Lists.BOSS_BYPASS_UNITS = {
+    -- Units that bypass BOTH threat and TTD checks.
+    -- Use for bosses that the rotation should always treat as a real,
+    -- long-lived target, even pre-pull or when threat is lost.
+}
+
 
 
 return Lists

@@ -16,13 +16,11 @@ local function create_spell(id, is_off_gcd)
             return current or 0
         end,
         cast = function(self, target, reason, options)
+            if not target then return false end
             if self.is_off_gcd then
                 local now = core.time()
                 if now - self.last_cast < .5 then return false end
             end
-            if not self:is_learned() then return false end
-            if not self:cooldown_up() then return false end
-            if not target then return false end
             options = options or {}
             if not options.skip_castable then
                 if not core.spell_book.is_usable_spell(self.id) then
@@ -77,6 +75,7 @@ local Spells = {
     SABER_JAWS = create_spell(421432),
     ASHAMANES_GUIDANCE = create_spell(391548),
     THRIVING_GROWTH = create_spell(439528),
+    FLUID_FORM = create_spell(449193),
 
     -- Adding shadowmeld, berserking, potion, etc.
     SHADOWMELD = create_spell(58984, true),
