@@ -153,9 +153,9 @@ actionList.cooldown = function(target, spell_targets)
 
     -- incarnation / berserk
     if has_tf and not variable.holdBerserk then
-        if core.spell_book.is_spell_learned(spells.INCARNATION.id) and spells.INCARNATION:cooldown_up() then
+        if core.spell_book.is_spell_learned(spells.INCARNATION.id) then
             if spells.INCARNATION:cast(me, "Incarnation") then return true end
-        elseif core.spell_book.is_spell_learned(spells.BERSERK.id) and spells.BERSERK:cooldown_up() then
+        elseif core.spell_book.is_spell_learned(spells.BERSERK.id) then
             if not menu.USE_PUZZLE_BOX:get_state() or not core.spell_book.is_item_usable(193701) or me:has_buff(383781) then
                 if spells.BERSERK:cast(me, "Berserk") then return true end
             end
@@ -171,18 +171,16 @@ actionList.cooldown = function(target, spell_targets)
 
     if menu.USE_MINI_CDS:get_toggle_state() and can_cast_frenzy and funcs.get_group_time_to_die(8) >= 15 then
         if talent.frantic_frenzy then
-            if core.spell_book.is_spell_learned(spells.FRANTIC_FRENZY.id) and spells.FRANTIC_FRENZY:cooldown_up() then
+            if core.spell_book.is_spell_learned(spells.FRANTIC_FRENZY.id) then
                 if spells.FRANTIC_FRENZY:cast(target, "Frantic Frenzy") then return true end
             end
         else
-            if spells.FERAL_FRENZY:cooldown_up() then
-                if spells.FERAL_FRENZY:cast(target, "Feral Frenzy") then return true end
-            end
+            if spells.FERAL_FRENZY:cast(target, "Feral Frenzy") then return true end
         end
     end
 
     -- convoke_the_spirits
-    if core.spell_book.is_spell_learned(spells.CONVOKE_THE_SPIRITS.id) and spells.CONVOKE_THE_SPIRITS:cooldown_up() then
+    if core.spell_book.is_spell_learned(spells.CONVOKE_THE_SPIRITS.id) then
         if has_bs or (has_tf and not variable.holdConvoke) then
             if not funcs.any_missing_rip(8, 5, 7) then
                 if spells.CONVOKE_THE_SPIRITS:cast(me, "Convoke (All Rip up)") then return true end
@@ -202,9 +200,9 @@ actionList.aoe_builder = function(target, spell_targets, combo_points, energy)
 
     -- Clearcasting: spend on Swipe/Brutal Slash in AoE (free ability)
     if has_cc then
-        if core.spell_book.is_spell_learned(spells.BRUTAL_SLASH.id) and spells.BRUTAL_SLASH:cooldown_up() then
+        if core.spell_book.is_spell_learned(spells.BRUTAL_SLASH.id) then
             if spells.BRUTAL_SLASH:cast(me, "Brutal Slash (Clearcasting)") then return true end
-        elseif core.spell_book.is_spell_learned(spells.SWIPE_CAT.id) and spells.SWIPE_CAT:cooldown_up() then
+        elseif core.spell_book.is_spell_learned(spells.SWIPE_CAT.id) then
             if spells.SWIPE_CAT:cast(me, "Swipe (Clearcasting)") then return true end
         end
     end
@@ -219,7 +217,7 @@ actionList.aoe_builder = function(target, spell_targets, combo_points, energy)
     end
 
     -- Thrash
-    if core.spell_book.is_spell_learned(spells.THRASH_CAT.id) and spells.THRASH_CAT:cooldown_up() then
+    if core.spell_book.is_spell_learned(spells.THRASH_CAT.id) then
         local thrash_target = funcs.get_best_dot_target(lists.DEBUFFS.THRASH, spells.THRASH_CAT.id, thrash_thresh, target,
             7)
         if thrash_target then
@@ -238,11 +236,11 @@ actionList.aoe_builder = function(target, spell_targets, combo_points, energy)
     end
 
     -- Swipe / Brutal Slash
-    if core.spell_book.is_spell_learned(spells.BRUTAL_SLASH.id) and spells.BRUTAL_SLASH:cooldown_up() then
+    if core.spell_book.is_spell_learned(spells.BRUTAL_SLASH.id) then
         if me:has_buff(lists.BUFFS.SUDDEN_AMBUSH) and spell_targets >= 5 then
             if spells.BRUTAL_SLASH:cast(me, "Brutal Slash (Sudden Ambush)") then return true end
         end
-    elseif core.spell_book.is_spell_learned(spells.SWIPE_CAT.id) and spells.SWIPE_CAT:cooldown_up() then
+    elseif core.spell_book.is_spell_learned(spells.SWIPE_CAT.id) then
         if me:has_buff(lists.BUFFS.SUDDEN_AMBUSH) and spell_targets >= 5 then
             if spells.SWIPE_CAT:cast(me, "Swipe (Sudden Ambush)") then return true end
         end
@@ -254,10 +252,10 @@ actionList.aoe_builder = function(target, spell_targets, combo_points, energy)
     end
 
     if combo_points > 1 or spell_targets > 2 or not talent.panthers_guile then
-        if core.spell_book.is_spell_learned(spells.BRUTAL_SLASH.id) and spells.BRUTAL_SLASH:cooldown_up() then
+        if core.spell_book.is_spell_learned(spells.BRUTAL_SLASH.id) then
             if energy < 25 then return true end
             if spells.BRUTAL_SLASH:cast(me, "Brutal Slash") then return true end
-        elseif core.spell_book.is_spell_learned(spells.SWIPE_CAT.id) and spells.SWIPE_CAT:cooldown_up() then
+        elseif core.spell_book.is_spell_learned(spells.SWIPE_CAT.id) then
             if energy < 35 then return true end
             if spells.SWIPE_CAT:cast(me, "Swipe") then return true end
         end
@@ -309,7 +307,7 @@ actionList.builder = function(target, spell_targets, combo_points, energy)
 
     local is_prowled = me:has_buff(lists.BUFFS.PROWL) or me:has_buff(lists.BUFFS.SHADOWMELD)
     if not is_prowled and funcs.get_debuff_remains(target, lists.DEBUFFS.RAKE) < rake_thresh then
-        if core.spell_book.is_spell_learned(spells.SHADOWMELD.id) and spells.SHADOWMELD:cooldown_up() then
+        if core.spell_book.is_spell_learned(spells.SHADOWMELD.id) then
             if spells.SHADOWMELD:cast(me, "Shadowmeld") then return true end
         end
     end
@@ -364,7 +362,7 @@ end
 -- APL: utility
 actionList.utility = function()
     if menu.AUTO_INTERRUPT:get_toggle_state() then
-        if core.spell_book.is_spell_learned(spells.SKULL_BASH.id) and spells.SKULL_BASH:cooldown_up() then
+        if core.spell_book.is_spell_learned(spells.SKULL_BASH.id) then
             local target = funcs.get_interrupt_target()
             if target then
                 if spells.SKULL_BASH:cast(target, "Skull Bash") then return true end
@@ -374,7 +372,7 @@ actionList.utility = function()
 
     -- Dispel
     if menu.AUTO_DISPEL:get_toggle_state() then
-        if core.spell_book.is_spell_learned(spells.REMOVE_CORRUPTION.id) and spells.REMOVE_CORRUPTION:cooldown_up() then
+        if core.spell_book.is_spell_learned(spells.REMOVE_CORRUPTION.id) then
             local dispel_target = funcs.check_all_dispels()
             if dispel_target then
                 if spells.REMOVE_CORRUPTION:cast(dispel_target, "Remove Corruption") then return true end
@@ -474,7 +472,7 @@ local function on_update()
         if core.input.use_item(193701) then return true end
     end
 
-    if not want_box and menu.USE_MINI_CDS:get_toggle_state() and spells.TIGERS_FURY:cooldown_up() and frenzy_tf_check() and funcs.get_group_time_to_die(8) >= 15 then
+    if not want_box and menu.USE_MINI_CDS:get_toggle_state() and frenzy_tf_check() and funcs.get_group_time_to_die(8) >= 15 then
         if spells.TIGERS_FURY:cast(me, "Tiger's Fury") then return end
     end
 

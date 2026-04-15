@@ -17,9 +17,14 @@ local function create_spell(id, is_off_gcd)
         end,
         cast = function(self, target, reason, options)
             if not target then return false end
+            -- core.time() returns milliseconds
+            local now = core.time()
             if self.is_off_gcd then
-                local now = core.time()
-                if now - self.last_cast < .5 then return false end
+                if now - self.last_cast < 0.500 then return false end
+            else
+                -- GCD spells: throttle re-queues so the dispatcher isn't fed duplicates
+                -- while the cast is still starting (before is_casting() flips true).
+                if now - self.last_cast < 0.400 then return false end
             end
             options = options or {}
             if not options.skip_castable then
@@ -27,17 +32,14 @@ local function create_spell(id, is_off_gcd)
                     return false
                 end
             end
-            if self.is_off_gcd then
-                if core.input.cast_target_spell(self.id, target) then
-                    self.last_cast = core.time()
-                    core.log("Casting spell " .. tostring(self.id) .. " on target " .. tostring(target:get_name()))
-                    return true
-                end
-                return false
+            if not self:cooldown_up() then return false end
+
+            if core.input.cast_target_spell(self.id, target) then
+                self.last_cast = now
+                core.log(reason .. " on target " .. tostring(target:get_name()))
+                return true
             end
-            spell_queue:queue_spell_target(self.id, target, options.priority or 1)
-            --core.log("Queuing spell " .. tostring(self.id) .. " on target " .. tostring(target:get_name()))
-            return true
+            return false
         end
     }
 end
