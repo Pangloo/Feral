@@ -29,6 +29,14 @@ Lists.DISPEL_LOGIC = {
     -- Example: [spell_id] = { priority = 1, stacks = 1 }
 }
 
+--------------------------------------------------------------------------------
+-- INTERRUPT NPC BLACKLIST (npc_id → skip interrupting this unit entirely)
+--------------------------------------------------------------------------------
+Lists.INTERRUPT_NPC_BLACKLIST = {
+    [255133] = true,
+    [251568] = true,
+}
+
 Lists.SPECIAL_DISPELS = {
     -- White-listed dangerous spells that might not show up as standard debuff types
     [440313] = true, -- affix
@@ -39,6 +47,8 @@ Lists.THREAT_BYPASS_UNITS = {
     [196642] = true, -- hungry_lasher
     [243208] = true, -- dummy
     [259569] = true, -- mana battery 1
+    [243169] = true, -- st dumm
+    [122716] = true, -- Coalesced Void
 }
 
 

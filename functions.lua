@@ -440,7 +440,7 @@ function Functions.get_interrupt_target()
     end
 
     for _, enemy in ipairs(cached_enemies) do
-        if Functions.validate_enemy(enemy, true) then
+        if Functions.validate_enemy(enemy, true) and not lists.INTERRUPT_NPC_BLACKLIST[enemy:get_npc_id()] then
             local start_time, end_time, key
             if enemy:is_casting_spell() and enemy:is_active_spell_interruptable() then
                 start_time = enemy:get_active_spell_cast_start_time()
