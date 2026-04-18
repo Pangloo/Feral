@@ -70,6 +70,22 @@ local motw_is_missing = false
 
 local ttd_cache = {}
 local last_ttd_clear = 0
+local TTD_CLEANUP_INTERVAL = 5 -- seconds between cleanup sweeps
+local TTD_STALE_TIME = 30      -- seconds before an entry is considered stale
+local TTD_HISTORY_WINDOW = 30  -- seconds of history retained for DPS estimate
+
+-- Bosses and miniboss-tier units should never return a short fallback TTD.
+-- NOTE: In M+ every trash mob is classified ELITE, so ELITE itself is NOT a
+-- signal of "big unit" — only WORLD_BOSS and the boss flag are reliable, plus
+-- a max-HP heuristic to catch minibosses that aren't flagged as bosses.
+local function is_big_unit(unit, max_health)
+    if unit_helper:is_boss(unit) then return true end
+    if unit.get_classification then
+        local c = unit:get_classification()
+        if c == enums.classification.WORLD_BOSS then return true end
+    end
+    return (max_health or 0) > 15000000
+end
 
 function Functions.get_time_to_die(unit)
     if not unit or not unit:is_valid() or unit:is_dead() then return 0 end
@@ -79,12 +95,12 @@ function Functions.get_time_to_die(unit)
     end
 
     local guid = tostring(unit:get_guid())
-    local now = core.time()
+    local now = core.time() -- seconds
 
-    -- Cleanup cache every 30 seconds
-    if now - last_ttd_clear > 30000 then
+    -- Cleanup cache periodically (seconds, matches Augmentation/Preservation)
+    if now - last_ttd_clear > TTD_CLEANUP_INTERVAL then
         for k, v in pairs(ttd_cache) do
-            if now - v.last_seen > 15000 then
+            if now - v.last_seen > TTD_STALE_TIME then
                 ttd_cache[k] = nil
             end
         end
@@ -96,6 +112,8 @@ function Functions.get_time_to_die(unit)
     if max_health == 0 then return 9999 end
     local health_pct = unit:get_health_percentage()
 
+    if is_big_unit(unit, max_health) then return 9999 end
+
     if not ttd_cache[guid] then
         ttd_cache[guid] = { history = {}, last_seen = now }
     end
@@ -103,18 +121,18 @@ function Functions.get_time_to_die(unit)
     ttd_cache[guid].last_seen = now
     local history = ttd_cache[guid].history
 
-    -- Insert once every 500ms to avoid bloating
-    if #history == 0 or (now - history[#history].time >= 500) then
+    -- Insert once every 500ms (seconds) to avoid bloating
+    if #history == 0 or (now - history[#history].time >= 0.5) then
         table.insert(history, { time = now, health = health })
     end
 
-    -- Keep only the last 8 seconds of history
-    while #history > 0 and (now - history[1].time > 8000) do
+    -- Retain up to TTD_HISTORY_WINDOW seconds of history for stable estimates on big HP pools
+    while #history > 0 and (now - history[1].time > TTD_HISTORY_WINDOW) do
         table.remove(history, 1)
     end
 
-    -- Fallback TTD based on health percentage if history isn't useful
-    -- We assume roughly 1.5% health loss per second as a conservative estimate for new targets
+    -- Fallback TTD based on health percentage if history isn't useful.
+    -- Assumes ~1.5% HP/sec — only safe for brand-new trash. Big units are bypassed above.
     local fallback_ttd = health_pct / 1.5
     if health_pct > 50 then fallback_ttd = 9999 end
 
@@ -125,17 +143,16 @@ function Functions.get_time_to_die(unit)
     local first = history[1]
     local last = history[#history]
 
-    local time_diff = (last.time - first.time) / 1000.0
-    if time_diff <= 0.5 then
+    local time_diff = last.time - first.time -- seconds
+    if time_diff < 2 then
         return fallback_ttd
     end
 
     local health_diff = first.health - last.health
     if health_diff <= 0 then
-        -- No recent damage detected.
-        -- If health is high (e.g. boss pooling), assume it will live.
-        -- If health is low, use the fallback to avoid wasting CDs.
-        return health_pct > 30 and 9999 or fallback_ttd
+        -- No net damage over the window: unit is pooling, healed, or shielded.
+        -- Treat as effectively infinite rather than burning CDs at low HP.
+        return 9999
     end
 
     local dps = health_diff / time_diff
@@ -459,8 +476,6 @@ end
 local dispel_cache_target = nil
 local dispel_cache_buff = nil
 local dispel_cache_type = nil
-local current_dispel_index = 1
-local next_dispel_eval_time = 0
 
 -- Per-(ally,buff) first-seen tracking so we delay reaction by a human-like amount.
 -- key = ally_guid .. "_" .. buff_id  →  { first_seen = <core.time()>, delay = <seconds> }
@@ -471,34 +486,30 @@ local DISPEL_SEEN_STALE_TIME = 10
 local DISPEL_MIN_DELAY = 0.9
 local DISPEL_MAX_DELAY = 1.5
 
-local function dispel_seen_key(ally, buff_id)
-    return tostring(ally:get_guid()) .. "_" .. tostring(buff_id)
+local function dispel_seen_key_str(guid_str, buff_id)
+    return guid_str .. "_" .. tostring(buff_id)
 end
 
--- Returns true if the (ally, buff) pair has been observed long enough to react.
--- Records first-seen on the first call and assigns a randomized delay.
-local function dispel_delay_ready(ally, buff_id, now)
-    local key = dispel_seen_key(ally, buff_id)
+local function dispel_record_seen(guid_str, buff_id, now)
+    local key = dispel_seen_key_str(guid_str, buff_id)
     local entry = dispel_seen[key]
     if not entry then
-        dispel_seen[key] = {
+        entry = {
             first_seen = now,
             delay = DISPEL_MIN_DELAY + math.random() * (DISPEL_MAX_DELAY - DISPEL_MIN_DELAY),
         }
-        return false
+        dispel_seen[key] = entry
     end
-    return (now - entry.first_seen) >= entry.delay
+    return entry
 end
 
+-- Single full-group sweep: records first_seen for every dispelable aura/debuff
+-- on every ally, then returns the first ally whose delay has elapsed AND who
+-- is castable now. Recording is intentionally NOT gated on cooldown or LoS so
+-- the timer reflects when the debuff actually appeared, not when we could act.
 function Functions.check_all_dispels()
     if not menu.AUTO_DISPEL:get_toggle_state() then
         dispel_cache_target = nil
-        return nil, nil, nil
-    end
-
-    local dispel_up = spells.REMOVE_CORRUPTION:is_learned() and spells.REMOVE_CORRUPTION:cooldown_up()
-
-    if not dispel_up then
         return nil, nil, nil
     end
 
@@ -514,51 +525,45 @@ function Functions.check_all_dispels()
         last_dispel_seen_clear = now
     end
 
-    if dispel_cache_target and dispel_cache_target:is_valid() and not dispel_cache_target:is_dead() then
+    local can_act = spells.REMOVE_CORRUPTION:is_learned() and spells.REMOVE_CORRUPTION:cooldown_up()
+
+    -- Fast path: previously chosen target still has the debuff and is ready.
+    if can_act and dispel_cache_target and dispel_cache_target:is_valid() and not dispel_cache_target:is_dead() then
         if Functions.has_debuff(dispel_cache_target, dispel_cache_buff) or Functions.has_buff(dispel_cache_target, dispel_cache_buff) then
-            if dispel_delay_ready(dispel_cache_target, dispel_cache_buff, now) then
+            local guid_str = tostring(dispel_cache_target:get_guid())
+            local entry = dispel_record_seen(guid_str, dispel_cache_buff, now)
+            if (now - entry.first_seen) >= entry.delay and Functions.validate_unit(dispel_cache_target) then
                 return dispel_cache_target, dispel_cache_buff, dispel_cache_type
             end
-            -- Still cached, but the human-reaction delay hasn't elapsed yet.
-            return nil, nil, nil
+        else
+            dispel_cache_target = nil
         end
     end
-    dispel_cache_target = nil
 
     local allies = cached_party
     local num_allies = #allies
-
     if num_allies == 0 then return nil, nil, nil end
-    if now < next_dispel_eval_time then
-        return nil, nil, nil
-    end
 
-    local max_checks_per_frame = math.max(1, math.floor(num_allies / 4))
-    local checks_this_frame = 0
+    local ready_target, ready_buff, ready_type = nil, nil, nil
 
-    while checks_this_frame < max_checks_per_frame do
-        if current_dispel_index > num_allies then
-            current_dispel_index = 1
-            next_dispel_eval_time = now + 0.25
-            break
-        end
+    for i = 1, num_allies do
+        local ally = allies[i]
+        if ally and ally:is_valid() and not ally:is_dead() then
+            local guid_str = tostring(ally:get_guid())
+            local in_los = Functions.validate_unit(ally)
 
-        local ally = allies[current_dispel_index]
-        current_dispel_index = current_dispel_index + 1
-        checks_this_frame = checks_this_frame + 1
-
-        if Functions.validate_unit(ally) then
             local auras = ally:get_auras()
             if auras then
                 for _, aura in ipairs(auras) do
-                    if aura.buff_id and lists.SPECIAL_DISPELS and lists.SPECIAL_DISPELS[aura.buff_id] then
-                        dispel_cache_target = ally
-                        dispel_cache_buff = aura.buff_id
-                        dispel_cache_type = aura.type
-                        if dispel_delay_ready(ally, aura.buff_id, now) then
-                            return dispel_cache_target, dispel_cache_buff, dispel_cache_type
+                    local bid = aura.buff_id
+                    if bid and lists.SPECIAL_DISPELS and lists.SPECIAL_DISPELS[bid] then
+                        local entry = dispel_record_seen(guid_str, bid, now)
+                        if not ready_target and can_act and in_los
+                            and (now - entry.first_seen) >= entry.delay then
+                            ready_target = ally
+                            ready_buff = bid
+                            ready_type = aura.type
                         end
-                        return nil, nil, nil
                     end
                 end
             end
@@ -567,20 +572,26 @@ function Functions.check_all_dispels()
             if debuffs then
                 for _, debuff in pairs(debuffs) do
                     local t = debuff.type
-                    if t == enums.buff_type.POISON or
-                        t == enums.buff_type.CURSE then
+                    if t == enums.buff_type.POISON or t == enums.buff_type.CURSE then
                         local bid = debuff.buff_id or 0
-                        dispel_cache_target = ally
-                        dispel_cache_buff = bid
-                        dispel_cache_type = t
-                        if dispel_delay_ready(ally, bid, now) then
-                            return dispel_cache_target, dispel_cache_buff, dispel_cache_type
+                        local entry = dispel_record_seen(guid_str, bid, now)
+                        if not ready_target and can_act and in_los
+                            and (now - entry.first_seen) >= entry.delay then
+                            ready_target = ally
+                            ready_buff = bid
+                            ready_type = t
                         end
-                        return nil, nil, nil
                     end
                 end
             end
         end
+    end
+
+    if ready_target then
+        dispel_cache_target = ready_target
+        dispel_cache_buff = ready_buff
+        dispel_cache_type = ready_type
+        return ready_target, ready_buff, ready_type
     end
 
     return nil, nil, nil
