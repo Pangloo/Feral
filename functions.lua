@@ -243,34 +243,40 @@ function Functions.update_enemy_cache()
         local bypass = lists.THREAT_BYPASS_UNITS
         local boss_bypass = lists.BOSS_BYPASS_UNITS
 
+        local my_phase = me:get_unit_phase()
         local objects = core.object_manager.get_visible_objects()
         for _, obj in ipairs(objects) do
-            if obj:is_valid() and obj:is_unit() and not obj:is_dead() and me:can_attack(obj) and ((me:get_threat_situation(obj) ~= nil and obj:is_in_combat()) or bypass[obj:get_npc_id()] or boss_bypass[obj:get_npc_id()]) then
-                local is_blacklisted = false
+            if obj:is_valid() and obj:is_unit() and not obj:is_dead() and me:can_attack(obj) then
                 local npc_id = obj:get_npc_id()
-                if blacklist and blacklist[npc_id] then
-                    for _, buff_id in ipairs(blacklist[npc_id]) do
-                        if Functions.get_buff_remains(obj, buff_id) > 0 then
-                            is_blacklisted = true
-                            break
+                if (me:get_threat_situation(obj) ~= nil and obj:is_in_combat()) or bypass[npc_id] or boss_bypass[npc_id] then
+                    if obj:get_unit_phase() == my_phase then
+                        local is_blacklisted = false
+                        local bl = blacklist and blacklist[npc_id]
+                        if bl then
+                            for _, buff_id in ipairs(bl) do
+                                if Functions.get_buff_remains(obj, buff_id) > 0 then
+                                    is_blacklisted = true
+                                    break
+                                end
+                            end
+                        end
+
+                        if not is_blacklisted then
+                            idx = idx + 1
+                            cached_enemies[idx] = obj
+
+                            local guid = obj:get_guid()
+                            local in_los = spell_helper:is_spell_in_line_of_sight(check_spell, me, obj)
+                            local melee_dist = math.max(0, obj:distance() - obj:get_bounding_radius() - my_bounding)
+                            local in_shred_range = core.spell_book.is_spell_in_range(check_spell, obj)
+                            cached_enemy_data[guid] = {
+                                in_los = in_los,
+                                facing = in_los and me:is_looking_at(obj) or false,
+                                melee_dist = melee_dist,
+                                in_shred_range = in_shred_range and in_los,
+                            }
                         end
                     end
-                end
-
-                if not is_blacklisted and Chimaeruscheck(obj) then
-                    idx = idx + 1
-                    cached_enemies[idx] = obj
-
-                    local guid = obj:get_guid()
-                    local in_los = spell_helper:is_spell_in_line_of_sight(check_spell, me, obj)
-                    local melee_dist = math.max(0, obj:distance() - obj:get_bounding_radius() - my_bounding)
-                    local in_shred_range = core.spell_book.is_spell_in_range(check_spell, obj)
-                    cached_enemy_data[guid] = {
-                        in_los = in_los,
-                        facing = in_los and me:is_looking_at(obj) or false,
-                        melee_dist = melee_dist,
-                        in_shred_range = in_shred_range and in_los,
-                    }
                 end
             end
         end
@@ -359,7 +365,20 @@ function Functions.count_enemies_in_range(range)
     return math.max(1, count)
 end
 
+-- Per-tick memoization: callers (get_best_dot_target, get_group_time_to_die,
+-- rotation queries) frequently ask for the same (range, spell_id) combination
+-- multiple times per frame. Reuse the result list until the enemy cache refreshes.
+local all_enemies_cache = {}
+local all_enemies_cache_tick = -1
 function Functions.get_all_enemies_in_range(range, spell_id)
+    if all_enemies_cache_tick ~= last_enemy_scan then
+        all_enemies_cache_tick = last_enemy_scan
+        wipe(all_enemies_cache)
+    end
+    local key = tostring(range) .. "_" .. tostring(spell_id)
+    local cached = all_enemies_cache[key]
+    if cached then return cached end
+
     local melee = (range == 8) or (spell_id == spells.SWIPE_CAT.id)
     local need_facing = (spell_id ~= spells.SWIPE_CAT.id)
     local result = {}
@@ -376,6 +395,7 @@ function Functions.get_all_enemies_in_range(range, spell_id)
             end
         end
     end
+    all_enemies_cache[key] = result
     return result
 end
 
@@ -477,6 +497,15 @@ local dispel_cache_target = nil
 local dispel_cache_buff = nil
 local dispel_cache_type = nil
 
+-- Throttle the full-group aura/debuff sweep (most expensive call in raids:
+-- 20 allies × many auras × buff_manager lookups). Reaction delay is already
+-- 0.9–1.5s so polling at 100ms is imperceptible.
+local DISPEL_SCAN_INTERVAL = 0.1
+local last_dispel_scan = 0
+local dispel_last_target = nil
+local dispel_last_buff = nil
+local dispel_last_type = nil
+
 -- Per-(ally,buff) first-seen tracking so we delay reaction by a human-like amount.
 -- key = ally_guid .. "_" .. buff_id  →  { first_seen = <core.time()>, delay = <seconds> }
 local dispel_seen = {}
@@ -510,10 +539,20 @@ end
 function Functions.check_all_dispels()
     if not menu.AUTO_DISPEL:get_toggle_state() then
         dispel_cache_target = nil
+        dispel_last_target = nil
         return nil, nil, nil
     end
 
     local now = core.time()
+
+    -- Throttle: return last scan's result between full sweeps.
+    if (now - last_dispel_scan) < DISPEL_SCAN_INTERVAL then
+        if dispel_last_target and dispel_last_target:is_valid() and not dispel_last_target:is_dead() then
+            return dispel_last_target, dispel_last_buff, dispel_last_type
+        end
+        return nil, nil, nil
+    end
+    last_dispel_scan = now
 
     -- Periodically drop stale first-seen entries (debuff fell off, ally despawned, etc.)
     if now - last_dispel_seen_clear > DISPEL_SEEN_CLEANUP_INTERVAL then
@@ -533,6 +572,9 @@ function Functions.check_all_dispels()
             local guid_str = tostring(dispel_cache_target:get_guid())
             local entry = dispel_record_seen(guid_str, dispel_cache_buff, now)
             if (now - entry.first_seen) >= entry.delay and Functions.validate_unit(dispel_cache_target) then
+                dispel_last_target = dispel_cache_target
+                dispel_last_buff = dispel_cache_buff
+                dispel_last_type = dispel_cache_type
                 return dispel_cache_target, dispel_cache_buff, dispel_cache_type
             end
         else
@@ -591,9 +633,15 @@ function Functions.check_all_dispels()
         dispel_cache_target = ready_target
         dispel_cache_buff = ready_buff
         dispel_cache_type = ready_type
+        dispel_last_target = ready_target
+        dispel_last_buff = ready_buff
+        dispel_last_type = ready_type
         return ready_target, ready_buff, ready_type
     end
 
+    dispel_last_target = nil
+    dispel_last_buff = nil
+    dispel_last_type = nil
     return nil, nil, nil
 end
 
