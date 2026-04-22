@@ -288,7 +288,7 @@ actionList.aoe_finisher = function(target, spell_targets, combo_points, energy)
 
     -- Ferocious Bite / Ravage (Prioritized if no dot maintenance was performed)
     local has_bs = me:has_buff(lists.BUFFS.BERSERK) or me:has_buff(lists.BUFFS.INCARNATION)
-    local bite_cost = 25
+    local bite_cost = 50
     local min_cp = 5
     if (combo_points >= min_cp and not funcs.any_missing_rip(8, 5, 7)) or me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING) then
         if energy < bite_cost and not me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING) then return true end
@@ -343,7 +343,7 @@ end
 actionList.finisher = function(target, spell_targets, combo_points, energy, has_bs)
     local rip_thresh = 7
 
-    if combo_points >= 4 then
+    if combo_points >= 5 then
         local rip_target = funcs.get_best_dot_target(lists.DEBUFFS.RIP, spells.RIP.id, rip_thresh, target, 7)
         if rip_target then
             if energy < 30 then return true end
@@ -351,8 +351,8 @@ actionList.finisher = function(target, spell_targets, combo_points, energy, has_
         end
     end
 
-    local bite_cost = 25
-    if combo_points >= 4 + (has_bs and 1 or 0) and not funcs.any_missing_rip(8, 5, 7) then
+    local bite_cost = 50
+    if (combo_points >= 5 and not funcs.any_missing_rip(8, 5, 7)) or me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING) then
         if energy < bite_cost and not me:has_buff(lists.BUFFS.APEX_PREDATORS_CRAVING) then return true end
         if spells.FEROCIOUS_BITE:cast(target, "Ferocious Bite") then return true end
     end
