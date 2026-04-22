@@ -306,7 +306,7 @@ actionList.builder = function(target, spell_targets, combo_points, energy)
     local rake_thresh = tf_expiring and 10 or 4.5
 
     local is_prowled = me:has_buff(lists.BUFFS.PROWL) or me:has_buff(lists.BUFFS.SHADOWMELD)
-    if not is_prowled and funcs.get_debuff_remains(target, lists.DEBUFFS.RAKE) < rake_thresh then
+    if not is_prowled and funcs.get_my_debuff_remains(target, lists.DEBUFFS.RAKE) < rake_thresh then
         if core.spell_book.is_spell_learned(spells.SHADOWMELD.id) then
             if spells.SHADOWMELD:cast(me, "Shadowmeld") then return true end
         end

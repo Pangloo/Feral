@@ -28,6 +28,25 @@ function Functions.get_debuff_remains(unit, debuff_id)
     return 0
 end
 
+-- Source-filtered variant: only counts the debuff if WE applied it. Use for
+-- bleed/DoT tracking so another druid's Rip/Rake/Thrash/Moonfire doesn't
+-- suppress our refreshes.
+function Functions.get_my_debuff_remains(unit, debuff_id)
+    if not unit or not unit:is_valid() then return 0 end
+    if type(debuff_id) == "number" then
+        debuff_id = { debuff_id }
+    end
+    local debuff_info = buff_manager:get_debuff_data(unit, debuff_id)
+    if debuff_info and debuff_info.is_active then
+        local me = core.object_manager.get_local_player()
+        local caster = debuff_info.caster
+        if me and caster and caster:is_valid() and caster:get_guid() == me:get_guid() then
+            return debuff_info.remaining / 1000.0
+        end
+    end
+    return 0
+end
+
 function Functions.get_buff_remains(unit, buff_id)
     if not unit or not unit:is_valid() then return 0 end
     if type(buff_id) == "number" then
@@ -47,6 +66,18 @@ function Functions.has_debuff(unit, debuff_id)
     end
     local debuff_info = buff_manager:get_debuff_data(unit, debuff_id)
     return debuff_info and debuff_info.is_active == true
+end
+
+function Functions.has_my_debuff(unit, debuff_id)
+    if not unit or not unit:is_valid() then return false end
+    if type(debuff_id) == "number" then
+        debuff_id = { debuff_id }
+    end
+    local debuff_info = buff_manager:get_debuff_data(unit, debuff_id)
+    if not (debuff_info and debuff_info.is_active) then return false end
+    local me = core.object_manager.get_local_player()
+    local caster = debuff_info.caster
+    return me ~= nil and caster ~= nil and caster:is_valid() and caster:get_guid() == me:get_guid()
 end
 
 function Functions.has_buff(unit, buff_id)
@@ -406,7 +437,7 @@ function Functions.get_best_dot_target(debuff_id, spell_id, refresh_time, curren
     if current_target then
         local data = cached_enemy_data[current_target:is_valid() and current_target:get_guid() or 0]
         if data and data.in_los and (not need_facing or data.facing) and (not is_melee or data.melee_dist <= 8) then
-            if Functions.get_debuff_remains(current_target, debuff_id) < refresh_time and Functions.get_time_to_die(current_target) >= min_ttd then
+            if Functions.get_my_debuff_remains(current_target, debuff_id) < refresh_time and Functions.get_time_to_die(current_target) >= min_ttd then
                 return current_target
             end
         end
@@ -418,7 +449,7 @@ function Functions.get_best_dot_target(debuff_id, spell_id, refresh_time, curren
     local min_remains = 999
 
     for _, e in ipairs(enemies) do
-        local rem = Functions.get_debuff_remains(e, debuff_id)
+        local rem = Functions.get_my_debuff_remains(e, debuff_id)
         if rem < refresh_time and rem < min_remains and Functions.get_time_to_die(e) >= min_ttd then
             min_remains = rem
             best_target = e
@@ -432,7 +463,7 @@ function Functions.any_missing_rip(range, threshold, min_ttd)
     for _, enemy in ipairs(cached_enemies) do
         local data = cached_enemy_data[enemy:get_guid()]
         if data and data.in_los and data.melee_dist <= 8 then
-            local remains = Functions.get_debuff_remains(enemy, lists.DEBUFFS.RIP)
+            local remains = Functions.get_my_debuff_remains(enemy, lists.DEBUFFS.RIP)
             if remains < (threshold or 5) and Functions.get_time_to_die(enemy) >= (min_ttd or 7) then
                 return true
             end

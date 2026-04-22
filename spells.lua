@@ -16,15 +16,11 @@ local function create_spell(id, is_off_gcd)
             return current or 0
         end,
         cast = function(self, target, reason, options)
-            if not target then return false end
+            if not target or not target:is_valid() then return false end
             -- core.time() returns milliseconds
             local now = core.time()
             if self.is_off_gcd then
                 if now - self.last_cast < 0.500 then return false end
-            else
-                -- GCD spells: throttle re-queues so the dispatcher isn't fed duplicates
-                -- while the cast is still starting (before is_casting() flips true).
-                if now - self.last_cast < 0.400 then return false end
             end
             options = options or {}
             if not options.skip_castable then
