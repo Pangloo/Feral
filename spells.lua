@@ -11,16 +11,11 @@ local function create_spell(id, is_off_gcd)
         cooldown_up = function(self)
             return core.spell_book.get_spell_cooldown(self.id) <= 0
         end,
-        cooldown_remains = function(self)
-            local current = core.spell_book.get_spell_cooldown(self.id)
-            return current or 0
-        end,
         cast = function(self, target, reason, options)
             if not target or not target:is_valid() then return false end
-            -- core.time() returns milliseconds
             local now = core.time()
             if self.is_off_gcd then
-                if now - self.last_cast < 0.500 then return false end
+                if now - self.last_cast < 0.100 then return false end
             end
             options = options or {}
             if not options.skip_castable then
